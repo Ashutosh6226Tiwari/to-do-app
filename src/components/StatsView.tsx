@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Award,
   BarChart3,
@@ -7,7 +7,6 @@ import {
   Globe,
   History,
   Sparkles,
-  Volume2,
 } from 'lucide-react';
 import { FocusSessionRecord, MoodThemeConfig } from '../types';
 import { StudyStatsSummary } from '../utils/focusLogic';
@@ -15,7 +14,6 @@ import {
   generateWeeklyInsightWithGemini,
   searchGroundedStudyQuery,
   SearchGroundingResponse,
-  synthesizeSpeechWithGemini,
   WeeklyInsightResponse,
 } from '../utils/geminiClient';
 
@@ -43,11 +41,6 @@ export function StatsView({
   });
   const [isLoadingInsight, setIsLoadingInsight] = useState(false);
 
-  // TTS state (gemini-3.8-flash-tts)
-  const [isSynthesizingTts, setIsSynthesizingTts] = useState(false);
-  const [ttsStatus, setTtsStatus] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
   // Google Search Grounding Study Assistant state (gemini-3.8-flash)
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -71,32 +64,6 @@ export function StatsView({
       setInsight(res);
     } finally {
       setIsLoadingInsight(false);
-    }
-  };
-
-  const handleSpeakInsight = async () => {
-    if (!insight) return;
-    setIsSynthesizingTts(true);
-    setTtsStatus('Generating voice audio with gemini-3.8-flash-tts...');
-    try {
-      const textToRead = `${insight.headline}. ${insight.summary} Top study tip: ${insight.tips[0] || ''}`;
-      const { audioUrl, usedBrowserFallback } =
-        await synthesizeSpeechWithGemini(textToRead, 'Kore');
-      if (audioUrl) {
-        if (audioRef.current) {
-          audioRef.current.pause();
-        }
-        const audio = new Audio(audioUrl);
-        audioRef.current = audio;
-        await audio.play();
-        setTtsStatus('Playing Gemini TTS audio');
-      } else if (usedBrowserFallback) {
-        setTtsStatus('Playing spoken insight');
-      }
-    } catch {
-      setTtsStatus('Voice synthesis ready');
-    } finally {
-      setIsSynthesizingTts(false);
     }
   };
 
@@ -390,9 +357,9 @@ export function StatsView({
         </div>
       </div>
 
-      {/* Gemini Weekly Insight + TTS Audio + Google Search Grounding Assistant */}
+      {/* Gemini Weekly Insight + Google Search Grounding Assistant */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Weekly Insight Card with Gemini TTS (7 cols) */}
+        {/* Weekly Insight Card (7 cols) */}
         <div
           className={`lg:col-span-7 p-6 rounded-2xl ${themeConfig.glassCardClass} flex flex-col justify-between`}
         >
@@ -408,36 +375,15 @@ export function StatsView({
                 </h2>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSpeakInsight}
-                  disabled={isSynthesizingTts || !insight}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
-                  title="Read insight aloud using gemini-3.8-flash-tts"
-                >
-                  <Volume2 className="w-3.5 h-3.5" />
-                  <span>
-                    {isSynthesizingTts ? 'Synthesizing...' : 'Listen (TTS)'}
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleRefreshInsight}
-                  disabled={isLoadingInsight}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 ${themeConfig.buttonBgClass}`}
-                >
-                  {isLoadingInsight ? 'Analyzing...' : 'Refresh Insight'}
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleRefreshInsight}
+                disabled={isLoadingInsight}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 ${themeConfig.buttonBgClass}`}
+              >
+                {isLoadingInsight ? 'Analyzing...' : 'Refresh Insight'}
+              </button>
             </div>
-
-            {ttsStatus && (
-              <p className={`text-[11px] mb-2 ${themeConfig.textMutedClass}`}>
-                {ttsStatus}
-              </p>
-            )}
 
             {insight && (
               <div className="space-y-3">

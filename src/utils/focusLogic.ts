@@ -1,4 +1,10 @@
-import { FocusSessionRecord, LevelTitle, TimerMode } from '../types';
+import {
+  FocusSessionRecord,
+  LevelTitle,
+  PersistedTimerState,
+  TimerMode,
+  TimerSettings,
+} from '../types';
 
 export interface LevelProgressInfo {
   level: number;
@@ -89,6 +95,248 @@ export function calculateSessionXP(
   const baseXp = Math.round(durationMinutes) + 10;
   const multiplier = getStreakMultiplier(streakDays);
   return Math.round(baseXp * multiplier);
+}
+
+// ============================================================================
+// Timestamp-Based Pomodoro Timer Logic (Survives Background Tabs & Reloads)
+// ============================================================================
+
+export function getModeDurationMs(
+  mode: TimerMode,
+  settings: TimerSettings
+): number {
+  if (mode === 'focus') return Math.max(1, settings.focusMinutes) * 60 * 1000;
+  if (mode === 'shortBreak')
+    return Math.max(1, settings.shortBreakMinutes) * 60 * 1000;
+  return Math.max(1, settings.longBreakMinutes) * 60 * 1000;
+}
+
+export function getModeDurationMinutes(
+  mode: TimerMode,
+  settings: TimerSettings
+): number {
+  if (mode === 'focus') return Math.max(1, settings.focusMinutes);
+  if (mode === 'shortBreak') return Math.max(1, settings.shortBreakMinutes);
+  return Math.max(1, settings.longBreakMinutes);
+}
+
+export function createInitialTimerState(
+  settings: TimerSettings,
+  selectedTaskId: string | null = 'task-1'
+): PersistedTimerState {
+  return {
+    mode: 'focus',
+    isRunning: false,
+    endTimestamp: null,
+    remainingMsWhenPaused: getModeDurationMs('focus', settings),
+    completedFocusCycleCount: 0,
+    selectedTaskId,
+    activeRunId: 'run-initial',
+    lastCompletedRunId: null,
+  };
+}
+
+export function computeRemainingMs(
+  state: PersistedTimerState,
+  nowMs: number
+): number {
+  if (state.isRunning && state.endTimestamp !== null) {
+    return Math.max(0, state.endTimestamp - nowMs);
+  }
+  return Math.max(0, state.remainingMsWhenPaused);
+}
+
+export function computeRemainingSeconds(
+  state: PersistedTimerState,
+  nowMs: number
+): number {
+  return Math.ceil(computeRemainingMs(state, nowMs) / 1000);
+}
+
+export function startTimerState(
+  state: PersistedTimerState,
+  nowMs: number
+): PersistedTimerState {
+  if (state.isRunning && state.endTimestamp !== null) {
+    return state;
+  }
+  const durationToRun = Math.max(1000, state.remainingMsWhenPaused);
+  const nextRunId =
+    state.lastCompletedRunId === state.activeRunId
+      ? `run-${nowMs}`
+      : state.activeRunId || `run-${nowMs}`;
+  return {
+    ...state,
+    isRunning: true,
+    endTimestamp: nowMs + durationToRun,
+    activeRunId: nextRunId,
+  };
+}
+
+export function pauseTimerState(
+  state: PersistedTimerState,
+  nowMs: number
+): PersistedTimerState {
+  if (!state.isRunning || state.endTimestamp === null) {
+    return state;
+  }
+  const remainingMs = Math.max(0, state.endTimestamp - nowMs);
+  return {
+    ...state,
+    isRunning: false,
+    endTimestamp: null,
+    remainingMsWhenPaused: remainingMs,
+  };
+}
+
+export function resetTimerState(
+  state: PersistedTimerState,
+  settings: TimerSettings,
+  nowMs: number = Date.now()
+): PersistedTimerState {
+  return {
+    ...state,
+    isRunning: false,
+    endTimestamp: null,
+    remainingMsWhenPaused: getModeDurationMs(state.mode, settings),
+    activeRunId: `run-${nowMs}-reset`,
+  };
+}
+
+export function switchTimerModeState(
+  state: PersistedTimerState,
+  nextMode: TimerMode,
+  settings: TimerSettings,
+  nowMs: number = Date.now()
+): PersistedTimerState {
+  return {
+    ...state,
+    mode: nextMode,
+    isRunning: false,
+    endTimestamp: null,
+    remainingMsWhenPaused: getModeDurationMs(nextMode, settings),
+    activeRunId: `run-${nowMs}-${nextMode}`,
+  };
+}
+
+export interface CompletedSessionOutcome {
+  mode: TimerMode;
+  durationMinutes: number;
+  taskId: string | null;
+  runId: string;
+}
+
+export interface TimerEvaluationResult {
+  nextState: PersistedTimerState;
+  remainingSeconds: number;
+  completedSession: CompletedSessionOutcome | null;
+}
+
+/**
+ * Evaluates a timer tick or visibilitychange event using endTimestamp - nowMs.
+ * If the timer has expired (nowMs >= endTimestamp), transitions to the next mode,
+ * guards against duplicate XP awards using activeRunId / lastCompletedRunId,
+ * and returns the completedSession outcome once only.
+ */
+export function evaluateTimerTick(
+  state: PersistedTimerState,
+  settings: TimerSettings,
+  nowMs: number
+): TimerEvaluationResult {
+  if (!state.isRunning || state.endTimestamp === null) {
+    return {
+      nextState: state,
+      remainingSeconds: computeRemainingSeconds(state, nowMs),
+      completedSession: null,
+    };
+  }
+
+  const remainingMs = state.endTimestamp - nowMs;
+  if (remainingMs > 0) {
+    return {
+      nextState: state,
+      remainingSeconds: Math.ceil(remainingMs / 1000),
+      completedSession: null,
+    };
+  }
+
+  // Guard against double-completion of the exact same runId
+  if (state.lastCompletedRunId === state.activeRunId) {
+    return {
+      nextState: {
+        ...state,
+        isRunning: false,
+        endTimestamp: null,
+        remainingMsWhenPaused: getModeDurationMs(state.mode, settings),
+      },
+      remainingSeconds: Math.ceil(
+        getModeDurationMs(state.mode, settings) / 1000
+      ),
+      completedSession: null,
+    };
+  }
+
+  const finishedMode = state.mode;
+  const finishedDurationMinutes = getModeDurationMinutes(
+    finishedMode,
+    settings
+  );
+  const completedRunId = state.activeRunId;
+
+  const nextCycleCount =
+    finishedMode === 'focus'
+      ? state.completedFocusCycleCount + 1
+      : state.completedFocusCycleCount;
+
+  const nextMode: TimerMode =
+    finishedMode === 'focus'
+      ? nextCycleCount % 4 === 0
+        ? 'longBreak'
+        : 'shortBreak'
+      : 'focus';
+
+  const nextDurationMs = getModeDurationMs(nextMode, settings);
+  const nextRunId = `run-${nowMs}-${nextMode}-${nextCycleCount}`;
+
+  const nextState: PersistedTimerState = settings.autoSwitchModes
+    ? {
+        ...state,
+        mode: nextMode,
+        isRunning: true,
+        endTimestamp: nowMs + nextDurationMs,
+        remainingMsWhenPaused: nextDurationMs,
+        completedFocusCycleCount: nextCycleCount,
+        activeRunId: nextRunId,
+        lastCompletedRunId: completedRunId,
+      }
+    : {
+        ...state,
+        mode: nextMode,
+        isRunning: false,
+        endTimestamp: null,
+        remainingMsWhenPaused: nextDurationMs,
+        completedFocusCycleCount: nextCycleCount,
+        activeRunId: nextRunId,
+        lastCompletedRunId: completedRunId,
+      };
+
+  return {
+    nextState,
+    remainingSeconds: Math.ceil(nextDurationMs / 1000),
+    completedSession: {
+      mode: finishedMode,
+      durationMinutes: finishedDurationMinutes,
+      taskId: state.selectedTaskId,
+      runId: completedRunId,
+    },
+  };
+}
+
+export function formatTimeMMSS(totalSeconds: number): string {
+  const safeSecs = Math.max(0, Math.floor(totalSeconds));
+  const mins = Math.floor(safeSecs / 60);
+  const rem = safeSecs % 60;
+  return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
 }
 
 /**
@@ -209,10 +457,6 @@ export function computeStudyStats(
     (s) => s.completed && s.mode === 'focus' && s.durationMinutes > 0
   );
 
-  const [ty, tm, td] = todayKey.split('-').map(Number);
-  const todayDate = new Date(ty, tm - 1, td);
-
-  // Start of current week (Monday-based or last 7 days rolling)
   const sevenDaysAgoKey = addDays(todayKey, -6);
   const monthPrefix = todayKey.slice(0, 7); // YYYY-MM
 
@@ -285,7 +529,7 @@ export function computeStudyStats(
     }))
     .sort((a, b) => b.minutes - a.minutes);
 
-  // 16 weeks (112 days) GitHub-style heatmap aligned so the last column ends on Saturday or today
+  // 16 weeks (112 days) GitHub-style heatmap
   const totalHeatmapDays = 112;
   const heatmap: HeatmapCell[] = [];
   for (let i = totalHeatmapDays - 1; i >= 0; i--) {
@@ -309,9 +553,6 @@ export function computeStudyStats(
     todayKey
   );
 
-  // Suppress unused variable lint on todayDate
-  void todayDate;
-
   return {
     hoursToday: Number((minutesToday / 60).toFixed(1)),
     minutesToday,
@@ -327,3 +568,106 @@ export function computeStudyStats(
     heatmap,
   };
 }
+
+/**
+ * Computes ISO 8601 week key in format "YYYY-Www" (e.g. "2026-W44").
+ */
+export function getIsoWeekKey(input: Date | string = new Date()): string {
+  const d =
+    typeof input === 'string'
+      ? new Date(`${input.slice(0, 10)}T12:00:00Z`)
+      : new Date(
+          Date.UTC(input.getFullYear(), input.getMonth(), input.getDate())
+        );
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(
+    ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
+  );
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+/**
+ * Resets weeklyMinutes to 0 when storedWeekKey differs from currentWeekKey.
+ */
+export function normalizeWeeklyMinutes(
+  weeklyMinutes: number,
+  storedWeekKey: string,
+  currentWeekKey: string
+): { weeklyMinutes: number; weekKey: string; didReset: boolean } {
+  if (storedWeekKey !== currentWeekKey) {
+    return {
+      weeklyMinutes: 0,
+      weekKey: currentWeekKey,
+      didReset: true,
+    };
+  }
+  return {
+    weeklyMinutes: Math.max(0, Math.floor(weeklyMinutes)),
+    weekKey: currentWeekKey,
+    didReset: false,
+  };
+}
+
+/**
+ * Validates and normalizes a student username (3-20 alphanumeric/underscore chars).
+ */
+export function validateUsername(raw: string): {
+  valid: boolean;
+  trimmed: string;
+  usernameLower: string;
+  error?: string;
+} {
+  const trimmed = raw.trim();
+  const usernameLower = trimmed.toLowerCase();
+  if (trimmed.length < 3 || trimmed.length > 20) {
+    return {
+      valid: false,
+      trimmed,
+      usernameLower,
+      error: 'Username must be between 3 and 20 characters.',
+    };
+  }
+  if (!/^[a-zA-Z0-9_]+$/.test(trimmed)) {
+    return {
+      valid: false,
+      trimmed,
+      usernameLower,
+      error: 'Only letters, numbers, and underscores (_) are allowed.',
+    };
+  }
+  return { valid: true, trimmed, usernameLower };
+}
+
+/**
+ * Generates a 6-character uppercase alphanumeric Study Room code.
+ */
+export function generateRoomCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+/**
+ * Computes remaining seconds in a shared Study Room from startedAt (epoch ms) and durationSec.
+ * Uses the exact same timestamp-based calculation as the main timer.
+ */
+export function computeSharedRoomRemainingSeconds(
+  startedAtMs: number | null,
+  durationSec: number,
+  status: 'idle' | 'running' | 'paused' | 'completed',
+  nowMs: number
+): number {
+  const safeDuration = Math.max(10, Math.floor(durationSec));
+  if (status !== 'running' || !startedAtMs) {
+    return status === 'completed' ? 0 : safeDuration;
+  }
+  const endTimestampMs = startedAtMs + safeDuration * 1000;
+  const remainingMs = Math.max(0, endTimestampMs - nowMs);
+  return Math.ceil(remainingMs / 1000);
+}
+

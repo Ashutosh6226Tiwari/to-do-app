@@ -42,20 +42,6 @@ export interface SearchGroundingResponse {
   usedFallback?: boolean;
 }
 
-export interface ImageAnalysisResponse {
-  title: string;
-  subject: string;
-  summary: string;
-  keyConcepts: string[];
-  suggestedTasks: Array<{
-    title: string;
-    subject: string;
-    estimatedPomodoros: number;
-  }>;
-  usedFallback?: boolean;
-  notice?: string;
-}
-
 export async function generateStudyPlanWithGemini(
   goal: string,
   startDate: string,
@@ -76,7 +62,6 @@ export async function generateStudyPlanWithGemini(
     }
     throw new Error('Empty task list returned');
   } catch {
-    // Intelligent deterministic fallback when offline or API quota reached
     const cleanGoal = goal.trim();
     const subjectGuess =
       /physics/i.test(cleanGoal)
@@ -324,88 +309,6 @@ export async function searchGroundedStudyQuery(
         },
       ],
       usedFallback: true,
-    };
-  }
-}
-
-export async function synthesizeSpeechWithGemini(
-  text: string,
-  voiceName = 'Kore'
-): Promise<{ audioUrl: string | null; usedBrowserFallback: boolean }> {
-  try {
-    const res = await fetch('/api/gemini/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voiceName }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data.audioBase64) {
-      return {
-        audioUrl: `data:${data.mimeType || 'audio/wav'};base64,${data.audioBase64}`,
-        usedBrowserFallback: false,
-      };
-    }
-    throw new Error('No audioBase64');
-  } catch {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.02;
-      window.speechSynthesis.speak(utterance);
-    }
-    return { audioUrl: null, usedBrowserFallback: true };
-  }
-}
-
-export async function analyzeStudyImageWithGemini(
-  imageBase64: string,
-  mimeType: string,
-  prompt?: string
-): Promise<ImageAnalysisResponse> {
-  try {
-    const res = await fetch('/api/gemini/analyze-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageBase64, mimeType, prompt }),
-    });
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || `HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    if (data.title && Array.isArray(data.suggestedTasks)) {
-      return data;
-    }
-    throw new Error('Incomplete analysis response');
-  } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : '';
-    return {
-      title: 'Uploaded Study Material & Concept Breakdown',
-      subject: 'Physics & Mathematics',
-      summary:
-        'Extracted structured study concepts from your uploaded image, organizing definitions, equations, and review checkpoints into Pomodoro blocks.',
-      keyConcepts: [
-        'Conservation laws & differential relationships',
-        'Boundary conditions and vector orientation',
-        'Step-by-step problem derivation workflow',
-      ],
-      suggestedTasks: [
-        {
-          title: 'Summarize diagram equations & definitions into flashcards',
-          subject: 'Physics',
-          estimatedPomodoros: 1,
-        },
-        {
-          title: 'Complete 3 practice derivations from uploaded notes',
-          subject: 'Physics',
-          estimatedPomodoros: 2,
-        },
-      ],
-      usedFallback: true,
-      notice: errMsg
-        ? `Note: gemini-4-argon requires a billing-enabled API key in Settings > Secrets. Showing extracted study template preview.`
-        : undefined,
     };
   }
 }

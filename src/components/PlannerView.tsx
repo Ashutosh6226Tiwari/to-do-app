@@ -6,7 +6,6 @@ import {
   ChevronRight,
   Clock,
   Edit3,
-  Image as ImageIcon,
   ListTree,
   Play,
   Plus,
@@ -24,11 +23,9 @@ import {
 import { addDays, formatDateKey } from '../utils/focusLogic';
 import { TASK_COLORS } from '../utils/themes';
 import {
-  analyzeStudyImageWithGemini,
   breakDownTaskWithGemini,
   GeneratedPlanTask,
   generateStudyPlanWithGemini,
-  ImageAnalysisResponse,
 } from '../utils/geminiClient';
 
 interface PlannerViewProps {
@@ -44,18 +41,6 @@ interface PlannerViewProps {
   onToggleTaskComplete: (taskId: string) => void;
   onStartFocusTask: (taskId: string) => void;
 }
-
-const SAMPLE_STUDY_DIAGRAM_SVG_DATA_URI =
-  'data:image/svg+xml;utf8,' +
-  encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="360" viewBox="0 0 600 360">
-  <rect width="600" height="360" fill="#f8fafc"/>
-  <rect x="24" y="24" width="552" height="312" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
-  <text x="48" y="68" font-family="sans-serif" font-size="20" font-weight="bold" fill="#0f172a">Physics 201 - Rotational Dynamics Exam Syllabus</text>
-  <text x="48" y="108" font-family="sans-serif" font-size="15" fill="#334155">1. Moment of Inertia and Parallel-Axis Theorem: I = I_cm + M d^2</text>
-  <text x="48" y="142" font-family="sans-serif" font-size="15" fill="#334155">2. Torque and Angular Acceleration: tau_net = I * alpha</text>
-  <text x="48" y="176" font-family="sans-serif" font-size="15" fill="#334155">3. Rolling Without Slipping Kinetic Energy: K = 1/2 I_cm w^2 + 1/2 M v_cm^2</text>
-  <text x="48" y="210" font-family="sans-serif" font-size="15" fill="#334155">4. Conservation of Angular Momentum: L_i = L_f when tau_ext = 0</text>
-</svg>`);
 
 export function PlannerView({
   tasks,
@@ -99,19 +84,6 @@ export function PlannerView({
   const [breakingDownTaskId, setBreakingDownTaskId] = useState<string | null>(
     null
   );
-
-  // Gemini Image Analyzer Modal (gemini-4-argon)
-  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
-  const [uploadedImagePreview, setUploadedImagePreview] = useState<string>(
-    SAMPLE_STUDY_DIAGRAM_SVG_DATA_URI
-  );
-  const [uploadedMimeType, setUploadedMimeType] = useState<string>('image/png');
-  const [imagePrompt, setImagePrompt] = useState(
-    'Extract key formulas and create Pomodoro study tasks from this syllabus.'
-  );
-  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
-  const [imageAnalysisResult, setImageAnalysisResult] =
-    useState<ImageAnalysisResponse | null>(null);
 
   const allSubjects = Array.from(
     new Set(tasks.map((t) => t.subject).filter(Boolean))
@@ -248,52 +220,6 @@ export function PlannerView({
     setIsAiPlanOpen(false);
   };
 
-  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadedMimeType(file.type || 'image/jpeg');
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setUploadedImagePreview(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleAnalyzeImage = async () => {
-    if (!uploadedImagePreview) return;
-    setIsAnalyzingImage(true);
-    try {
-      const res = await analyzeStudyImageWithGemini(
-        uploadedImagePreview,
-        uploadedMimeType,
-        imagePrompt
-      );
-      setImageAnalysisResult(res);
-    } finally {
-      setIsAnalyzingImage(false);
-    }
-  };
-
-  const handleAddImageTasksToPlanner = () => {
-    if (!imageAnalysisResult) return;
-    const items = imageAnalysisResult.suggestedTasks.map((st, idx) => ({
-      title: st.title,
-      subject: st.subject || imageAnalysisResult.subject || 'Study Notes',
-      date: addDays(selectedDate, idx % 3),
-      time: idx === 0 ? '14:00' : '16:30',
-      color: TASK_COLORS[(idx + 1) % TASK_COLORS.length].hex,
-      estimatedPomodoros: st.estimatedPomodoros || 2,
-      completed: false,
-      notes: `From analyzed notes: ${imageAnalysisResult.title}`,
-    }));
-    onAddMultipleTasks(items);
-    setImageAnalysisResult(null);
-    setIsImageModalOpen(false);
-  };
-
-  // Date navigation helpers
   const shiftDate = (direction: -1 | 1) => {
     const delta =
       viewMode === 'day'
@@ -304,16 +230,14 @@ export function PlannerView({
     setSelectedDate(addDays(selectedDate, delta));
   };
 
-  // Compute week dates (7 days centered or starting from Sunday of selectedDate)
   const getWeekDates = (anchorKey: string): string[] => {
     const [y, m, d] = anchorKey.split('-').map(Number);
     const dt = new Date(y, m - 1, d);
-    const dayOfWeek = dt.getDay(); // 0 Sun .. 6 Sat
+    const dayOfWeek = dt.getDay();
     const sundayKey = addDays(anchorKey, -dayOfWeek);
     return Array.from({ length: 7 }, (_, i) => addDays(sundayKey, i));
   };
 
-  // Compute month calendar cells (35 or 42 cells)
   const getMonthDates = (anchorKey: string): string[] => {
     const [y, m] = anchorKey.split('-').map(Number);
     const firstDay = new Date(y, m - 1, 1);
@@ -368,15 +292,6 @@ export function PlannerView({
           >
             <Sparkles className="w-4 h-4" />
             <span>AI Study Plan</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsImageModalOpen(true)}
-            className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-2 border transition-colors whitespace-nowrap shrink-0 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
-          >
-            <ImageIcon className="w-4 h-4" />
-            <span>Scan Notes</span>
           </button>
 
           <button
@@ -482,18 +397,24 @@ export function PlannerView({
             >
               Schedule for {formatReadableDate(selectedDate)}
             </h2>
-            <span className={`text-xs font-mono tabular-nums ${themeConfig.textMutedClass}`}>
-              {filteredTasks.filter((t) => t.date === selectedDate).length} tasks scheduled
+            <span
+              className={`text-xs font-mono tabular-nums ${themeConfig.textMutedClass}`}
+            >
+              {filteredTasks.filter((t) => t.date === selectedDate).length} tasks
+              scheduled
             </span>
           </div>
 
           <div className="space-y-3">
-            {filteredTasks.filter((t) => t.date === selectedDate).length === 0 ? (
+            {filteredTasks.filter((t) => t.date === selectedDate).length ===
+            0 ? (
               <div className="py-12 text-center">
                 <CalendarIcon
                   className={`w-10 h-10 mx-auto mb-2 opacity-40 ${themeConfig.textMutedClass}`}
                 />
-                <p className={`text-sm font-medium ${themeConfig.textSecondaryClass}`}>
+                <p
+                  className={`text-sm font-medium ${themeConfig.textSecondaryClass}`}
+                >
                   No study tasks scheduled for this day yet.
                 </p>
                 <button
@@ -518,7 +439,9 @@ export function PlannerView({
                     onEdit={() => openEditModal(task)}
                     onDelete={() => onDeleteTask(task.id)}
                     onBreakDown={() => handleBreakDownTask(task)}
-                    onToggleSubtask={(subId) => handleToggleSubtask(task, subId)}
+                    onToggleSubtask={(subId) =>
+                      handleToggleSubtask(task, subId)
+                    }
                   />
                 ))
             )}
@@ -540,14 +463,12 @@ export function PlannerView({
                 onClick={() => setSelectedDate(dKey)}
                 className={`p-3.5 rounded-2xl transition-all flex flex-col min-h-[16rem] cursor-pointer ${
                   themeConfig.glassCardClass
-                } ${
-                  isSelected
-                    ? 'ring-2 ring-offset-1'
-                    : ''
-                }`}
+                } ${isSelected ? 'ring-2 ring-offset-1' : ''}`}
                 style={
                   isSelected
-                    ? { '--tw-ring-color': themeConfig.accentHex } as React.CSSProperties
+                    ? ({
+                        '--tw-ring-color': themeConfig.accentHex,
+                      } as React.CSSProperties)
                     : undefined
                 }
               >
@@ -632,7 +553,8 @@ export function PlannerView({
                             >
                               <span>{task.time}</span>
                               <span>
-                                {task.completedPomodoros}/{task.estimatedPomodoros} Pom
+                                {task.completedPomodoros}/
+                                {task.estimatedPomodoros} Pom
                               </span>
                             </div>
                           </div>
@@ -740,7 +662,7 @@ export function PlannerView({
         </div>
       )}
 
-      {/* Selected Day Detailed Task List (shown below Week/Month view for quick subtasks & AI breakdown) */}
+      {/* Selected Day Detailed Task List */}
       {viewMode !== 'day' && (
         <div className={`p-6 rounded-2xl ${themeConfig.glassCardClass}`}>
           <div className="flex items-center justify-between mb-4">
@@ -766,9 +688,11 @@ export function PlannerView({
           </div>
 
           <div className="space-y-3">
-            {filteredTasks.filter((t) => t.date === selectedDate).length === 0 ? (
+            {filteredTasks.filter((t) => t.date === selectedDate).length ===
+            0 ? (
               <p className={`text-sm py-4 ${themeConfig.textMutedClass}`}>
-                No tasks scheduled on {formatReadableDate(selectedDate)}. Click any day card above or add a new task.
+                No tasks scheduled on {formatReadableDate(selectedDate)}. Click
+                any day card above or add a new task.
               </p>
             ) : (
               filteredTasks
@@ -784,7 +708,9 @@ export function PlannerView({
                     onEdit={() => openEditModal(task)}
                     onDelete={() => onDeleteTask(task.id)}
                     onBreakDown={() => handleBreakDownTask(task)}
-                    onToggleSubtask={(subId) => handleToggleSubtask(task, subId)}
+                    onToggleSubtask={(subId) =>
+                      handleToggleSubtask(task, subId)
+                    }
                   />
                 ))
             )}
@@ -928,7 +854,9 @@ export function PlannerView({
                       onClick={() => setColorInput(c.hex)}
                       aria-label={`Select color ${c.name}`}
                       className={`w-7 h-7 rounded-full transition-transform ${
-                        colorInput === c.hex ? 'scale-110 ring-2 ring-offset-2' : ''
+                        colorInput === c.hex
+                          ? 'scale-110 ring-2 ring-offset-2'
+                          : ''
                       }`}
                       style={{ backgroundColor: c.hex }}
                     />
@@ -973,7 +901,7 @@ export function PlannerView({
         </div>
       )}
 
-      {/* Modal 2: Gemini AI Study Plan Generator (with Google Search Grounding) */}
+      {/* Modal 2: Gemini AI Study Plan Generator */}
       {isAiPlanOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm"
@@ -1006,7 +934,7 @@ export function PlannerView({
             </div>
 
             <p className={`text-xs mb-4 ${themeConfig.textSecondaryClass}`}>
-              Describe an upcoming exam, project, or study goal (e.g., "Physics exam in 10 days" or "AP Biology cellular respiration review"). Gemini will create a multi-day Pomodoro schedule on your planner.
+              Describe an upcoming exam, project, or study goal (e.g., "Physics exam in 10 days"). Gemini will create a multi-day Pomodoro schedule on your planner.
             </p>
 
             <form onSubmit={handleGenerateStudyPlan} className="space-y-3">
@@ -1048,7 +976,9 @@ export function PlannerView({
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>
-                    {isGeneratingPlan ? 'Generating Plan...' : 'Generate Study Plan'}
+                    {isGeneratingPlan
+                      ? 'Generating Plan...'
+                      : 'Generate Study Plan'}
                   </span>
                 </button>
               </div>
@@ -1056,7 +986,9 @@ export function PlannerView({
 
             {generatedPlan && (
               <div className="mt-5 pt-4 border-t border-black/10 dark:border-white/15 space-y-3">
-                <p className={`text-xs font-medium ${themeConfig.textPrimaryClass}`}>
+                <p
+                  className={`text-xs font-medium ${themeConfig.textPrimaryClass}`}
+                >
                   {generatedPlan.summary}
                 </p>
 
@@ -1113,151 +1045,6 @@ export function PlannerView({
                     className={`px-4 py-2 rounded-xl text-xs font-semibold ${themeConfig.buttonBgClass}`}
                   >
                     Place {generatedPlan.tasks.length} Tasks on Planner
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Modal 3: Analyze Study Notes / Syllabus Photo (gemini-4-argon) */}
-      {isImageModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="image-modal-title"
-        >
-          <div
-            className={`w-full max-w-xl p-6 rounded-2xl max-h-[90vh] overflow-y-auto ${themeConfig.glassCardClass}`}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <ImageIcon className="w-5 h-5 text-violet-500" />
-                <h2
-                  id="image-modal-title"
-                  className={`text-lg font-bold ${themeConfig.textPrimaryClass}`}
-                  style={{ fontFamily: themeConfig.fontDisplay }}
-                >
-                  Analyze Study Notes & Syllabus Photo
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsImageModalOpen(false)}
-                aria-label="Close image analyzer modal"
-                className={`p-1.5 rounded-lg ${themeConfig.textMutedClass}`}
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className={`text-xs mb-4 ${themeConfig.textSecondaryClass}`}>
-              Upload a photo of your handwritten lecture notes, textbook page, or syllabus to extract key concepts and Pomodoro study tasks using <span className="font-mono">gemini-4-argon</span>.
-            </p>
-
-            <div className="space-y-3">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <label className="cursor-pointer">
-                  <span
-                    className={`inline-block px-3.5 py-2 rounded-xl text-xs font-semibold border ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
-                  >
-                    Upload Photo...
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageFileUpload}
-                    className="hidden"
-                  />
-                </label>
-                <span className={`text-[11px] ${themeConfig.textMutedClass}`}>
-                  Or analyze the preloaded sample Physics 201 syllabus sheet below
-                </span>
-              </div>
-
-              {uploadedImagePreview && (
-                <div className="rounded-xl overflow-hidden border border-black/10 dark:border-white/15 bg-white/50 max-h-44 flex items-center justify-center">
-                  <img
-                    src={uploadedImagePreview}
-                    alt="Uploaded study notes preview"
-                    referrerPolicy="no-referrer"
-                    className="max-h-44 w-auto object-contain"
-                  />
-                </div>
-              )}
-
-              <div>
-                <label
-                  htmlFor="image-prompt-input"
-                  className={`block text-xs font-semibold mb-1 ${themeConfig.textSecondaryClass}`}
-                >
-                  Analysis Focus
-                </label>
-                <input
-                  id="image-prompt-input"
-                  type="text"
-                  value={imagePrompt}
-                  onChange={(e) => setImagePrompt(e.target.value)}
-                  className={`w-full px-3.5 py-2 rounded-xl text-xs outline-none ${themeConfig.glassInputClass}`}
-                />
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleAnalyzeImage}
-                  disabled={isAnalyzingImage}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold ${themeConfig.buttonBgClass}`}
-                >
-                  {isAnalyzingImage
-                    ? 'Analyzing with gemini-4-argon...'
-                    : 'Analyze Photo'}
-                </button>
-              </div>
-            </div>
-
-            {imageAnalysisResult && (
-              <div className="mt-4 pt-4 border-t border-black/10 dark:border-white/15 space-y-3">
-                {imageAnalysisResult.notice && (
-                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                    {imageAnalysisResult.notice}
-                  </p>
-                )}
-                <div>
-                  <h3
-                    className={`text-sm font-bold ${themeConfig.textPrimaryClass}`}
-                  >
-                    {imageAnalysisResult.title} · {imageAnalysisResult.subject}
-                  </h3>
-                  <p className={`text-xs mt-1 ${themeConfig.textSecondaryClass}`}>
-                    {imageAnalysisResult.summary}
-                  </p>
-                </div>
-
-                <div>
-                  <span
-                    className={`text-xs font-semibold block mb-1 ${themeConfig.textSecondaryClass}`}
-                  >
-                    Extracted Key Concepts:
-                  </span>
-                  <ul
-                    className={`list-disc list-inside text-xs space-y-1 ${themeConfig.textSecondaryClass}`}
-                  >
-                    {imageAnalysisResult.keyConcepts.map((c, idx) => (
-                      <li key={idx}>{c}</li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <button
-                    type="button"
-                    onClick={handleAddImageTasksToPlanner}
-                    className={`px-4 py-2 rounded-xl text-xs font-semibold ${themeConfig.buttonBgClass}`}
-                  >
-                    Add {imageAnalysisResult.suggestedTasks.length} Suggested Tasks to Planner
                   </button>
                 </div>
               </div>
@@ -1395,7 +1182,6 @@ function TaskCard({
         </div>
       </div>
 
-      {/* Subtasks list if broken down */}
       {task.subtasks && task.subtasks.length > 0 && (
         <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/10 pl-8 space-y-1.5">
           <span

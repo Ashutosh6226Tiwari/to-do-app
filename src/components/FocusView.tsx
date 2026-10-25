@@ -5,6 +5,7 @@ import {
   Disc3,
   FastForward,
   Headphones,
+  Music,
   Pause,
   Play,
   RotateCcw,
@@ -14,8 +15,10 @@ import {
   Waves,
 } from 'lucide-react';
 import {
+  CloudAudioTrack,
   MoodThemeConfig,
   MoodThemeId,
+  PersistedTimerState,
   StudyTask,
   TimerMode,
   TimerSettings,
@@ -26,21 +29,26 @@ import {
   suggestMoodThemeWithGemini,
 } from '../utils/geminiClient';
 import { MOOD_THEMES } from '../utils/themes';
+import { formatTimeMMSS, getModeDurationMs } from '../utils/focusLogic';
 
 interface FocusViewProps {
   tasks: StudyTask[];
-  selectedTaskId: string | null;
-  onSelectTaskId: (taskId: string | null) => void;
+  timerState: PersistedTimerState;
+  remainingSeconds: number;
   timerSettings: TimerSettings;
+  onStartPause: () => void;
+  onReset: () => void;
+  onSkip: () => void;
+  onCompleteSessionNow: () => void;
+  onSwitchMode: (nextMode: TimerMode) => void;
+  onSelectTaskId: (taskId: string | null) => void;
   onUpdateTimerSettings: (next: TimerSettings) => void;
   themeConfig: MoodThemeConfig;
   onSelectTheme: (theme: MoodThemeId) => void;
-  onSessionCompleted: (
-    mode: TimerMode,
-    durationMinutes: number,
-    taskId?: string
-  ) => void;
   onToggleSubtask: (taskId: string, subtaskId: string) => void;
+  lastCompletedToast: string | null;
+  onDismissToast: () => void;
+  customTracks?: CloudAudioTrack[];
 }
 
 const MODE_LABELS: Record<TimerMode, string> = {
@@ -51,38 +59,45 @@ const MODE_LABELS: Record<TimerMode, string> = {
 
 export function FocusView({
   tasks,
-  selectedTaskId,
-  onSelectTaskId,
+  timerState,
+  remainingSeconds,
   timerSettings,
+  onStartPause,
+  onReset,
+  onSkip,
+  onCompleteSessionNow,
+  onSwitchMode,
+  onSelectTaskId,
   onUpdateTimerSettings,
   themeConfig,
   onSelectTheme,
-  onSessionCompleted,
   onToggleSubtask,
+  lastCompletedToast,
+  onDismissToast,
+  customTracks = [],
 }: FocusViewProps) {
-  const [mode, setMode] = useState<TimerMode>('focus');
-  const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [completedFocusCycleCount, setCompletedFocusCycleCount] =
-    useState<number>(0);
-
-  const getDurationSecondsForMode = (
-    m: TimerMode,
-    settings = timerSettings
-  ): number => {
-    if (m === 'focus') return Math.max(1, settings.focusMinutes) * 60;
-    if (m === 'shortBreak') return Math.max(1, settings.shortBreakMinutes) * 60;
-    return Math.max(1, settings.longBreakMinutes) * 60;
-  };
-
-  const [secondsLeft, setSecondsLeft] = useState<number>(() =>
-    getDurationSecondsForMode('focus')
-  );
+  const { mode, isRunning, completedFocusCycleCount, selectedTaskId } =
+    timerState;
 
   // Ambient audio player state
   const [activeAmbient, setActiveAmbient] = useState<AmbientTrackId | null>(
+    () => soundEngine.getState().currentTrack
+  );
+  const [activeCustomTrackId, setActiveCustomTrackId] = useState<string | null>(
     null
   );
-  const [ambientVolume, setAmbientVolume] = useState<number>(0.45);
+  const customAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [ambientVolume, setAmbientVolume] = useState<number>(
+    () => soundEngine.getState().volume
+  );
+
+  useEffect(() => {
+    return () => {
+      if (customAudioRef.current) {
+        customAudioRef.current.pause();
+      }
+    };
+  }, []);
 
   // Mood-based theme suggestion state
   const [feelingInput, setFeelingInput] = useState<string>('');
@@ -90,144 +105,16 @@ export function FocusView({
   const [moodSuggestion, setMoodSuggestion] =
     useState<MoodSuggestionResponse | null>(null);
 
-  // Recent completion toast
-  const [lastCompletedToast, setLastCompletedToast] = useState<string | null>(
-    null
+  const selectedTask = tasks.find((t) => t.id === selectedTaskId) || null;
+  const totalSeconds = Math.ceil(
+    getModeDurationMs(mode, timerSettings) / 1000
   );
 
-  const selectedTask = tasks.find((t) => t.id === selectedTaskId) || null;
-  const totalSeconds = getDurationSecondsForMode(mode);
-
-  // Sync secondsLeft if user changes duration settings while paused at full duration
-  const prevSettingsRef = useRef(timerSettings);
-  useEffect(() => {
-    if (!isRunning) {
-      setSecondsLeft(getDurationSecondsForMode(mode, timerSettings));
-    }
-    prevSettingsRef.current = timerSettings;
-  }, [
-    timerSettings.focusMinutes,
-    timerSettings.shortBreakMinutes,
-    timerSettings.longBreakMinutes,
-    mode,
-  ]);
-
-  const formatTime = (secs: number): string => {
-    const mins = Math.floor(secs / 60);
-    const rem = secs % 60;
-    return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
-  };
-
-  // Browser tab title countdown
-  useEffect(() => {
-    const formatted = formatTime(secondsLeft);
-    const taskPart = selectedTask ? ` · ${selectedTask.title}` : '';
-    if (isRunning) {
-      document.title = `(${formatted}) ${MODE_LABELS[mode]}${taskPart} — FocusFlow`;
-    } else {
-      document.title = `${formatted} · FocusFlow — Student Study Planner & Pomodoro`;
-    }
-    return () => {
-      document.title = 'FocusFlow — Student Study Planner & Pomodoro';
-    };
-  }, [secondsLeft, isRunning, mode, selectedTask]);
-
-  const handleCompleteCurrentMode = (wasCompleted: boolean) => {
-    setIsRunning(false);
-
-    if (wasCompleted) {
-      if (timerSettings.soundAlertEnabled) {
-        soundEngine.playAlert(timerSettings.alertTone);
-      }
-
-      const durationMins =
-        mode === 'focus'
-          ? timerSettings.focusMinutes
-          : mode === 'shortBreak'
-            ? timerSettings.shortBreakMinutes
-            : timerSettings.longBreakMinutes;
-
-      onSessionCompleted(mode, durationMins, selectedTask?.id);
-
-      if (mode === 'focus') {
-        const nextCount = completedFocusCycleCount + 1;
-        setCompletedFocusCycleCount(nextCount);
-        setLastCompletedToast(
-          `Completed ${durationMins}m Focus Session! Earned XP & updated your study streak.`
-        );
-
-        const nextMode: TimerMode =
-          nextCount % 4 === 0 ? 'longBreak' : 'shortBreak';
-        setMode(nextMode);
-        setSecondsLeft(getDurationSecondsForMode(nextMode));
-        if (timerSettings.autoSwitchModes) {
-          setIsRunning(true);
-        }
-        return;
-      } else {
-        setLastCompletedToast(`${MODE_LABELS[mode]} complete! Ready to focus.`);
-        setMode('focus');
-        setSecondsLeft(getDurationSecondsForMode('focus'));
-        if (timerSettings.autoSwitchModes) {
-          setIsRunning(true);
-        }
-        return;
-      }
-    } else {
-      // Skipped without completing
-      const nextMode: TimerMode =
-        mode === 'focus'
-          ? (completedFocusCycleCount + 1) % 4 === 0
-            ? 'longBreak'
-            : 'shortBreak'
-          : 'focus';
-      setMode(nextMode);
-      setSecondsLeft(getDurationSecondsForMode(nextMode));
-    }
-  };
-
-  // Timer tick effect
-  useEffect(() => {
-    if (!isRunning) return;
-    const timer = window.setInterval(() => {
-      setSecondsLeft((prev) => {
-        if (prev <= 1) {
-          window.clearInterval(timer);
-          handleCompleteCurrentMode(true);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [
-    isRunning,
-    mode,
-    completedFocusCycleCount,
-    timerSettings,
-    selectedTask?.id,
-  ]);
-
-  // Cleanup ambient sound on unmount
-  useEffect(() => {
-    return () => {
-      soundEngine.stopAmbient();
-    };
-  }, []);
-
-  const handleModeSwitch = (nextMode: TimerMode) => {
-    setIsRunning(false);
-    setMode(nextMode);
-    setSecondsLeft(getDurationSecondsForMode(nextMode));
-  };
-
-  const handleReset = () => {
-    setIsRunning(false);
-    setSecondsLeft(getDurationSecondsForMode(mode));
-  };
-
   const handleToggleAmbient = (track: AmbientTrackId) => {
+    if (customAudioRef.current) {
+      customAudioRef.current.pause();
+      setActiveCustomTrackId(null);
+    }
     if (activeAmbient === track) {
       soundEngine.stopAmbient();
       setActiveAmbient(null);
@@ -237,9 +124,33 @@ export function FocusView({
     }
   };
 
+  const handleToggleCustomTrack = (track: CloudAudioTrack) => {
+    if (activeAmbient) {
+      soundEngine.stopAmbient();
+      setActiveAmbient(null);
+    }
+    if (activeCustomTrackId === track.id) {
+      customAudioRef.current?.pause();
+      setActiveCustomTrackId(null);
+    } else {
+      if (customAudioRef.current) {
+        customAudioRef.current.pause();
+      }
+      const audio = new Audio(track.url);
+      audio.loop = true;
+      audio.volume = ambientVolume;
+      customAudioRef.current = audio;
+      audio.play().catch(() => {});
+      setActiveCustomTrackId(track.id);
+    }
+  };
+
   const handleVolumeChange = (nextVol: number) => {
     setAmbientVolume(nextVol);
     soundEngine.setVolume(nextVol);
+    if (customAudioRef.current) {
+      customAudioRef.current.volume = nextVol;
+    }
   };
 
   const handleAskMoodSuggestion = async (e: React.FormEvent) => {
@@ -263,22 +174,13 @@ export function FocusView({
       shortBreakMinutes: moodSuggestion.shortBreakMinutes,
     };
     onUpdateTimerSettings(updatedSettings);
-    setIsRunning(false);
-    if (mode === 'focus') {
-      setSecondsLeft(moodSuggestion.focusMinutes * 60);
-    } else if (mode === 'shortBreak') {
-      setSecondsLeft(moodSuggestion.shortBreakMinutes * 60);
-    }
-    setLastCompletedToast(
-      `Applied ${MOOD_THEMES[moodSuggestion.theme].name} theme and ${moodSuggestion.focusMinutes}/${moodSuggestion.shortBreakMinutes}m session cadence.`
-    );
   };
 
   // Circular SVG Ring Geometry
   const radius = 126;
   const circumference = 2 * Math.PI * radius;
   const progressFraction =
-    totalSeconds > 0 ? (totalSeconds - secondsLeft) / totalSeconds : 0;
+    totalSeconds > 0 ? (totalSeconds - remainingSeconds) / totalSeconds : 0;
   const strokeDashoffset =
     circumference - Math.min(1, Math.max(0, progressFraction)) * circumference;
 
@@ -300,7 +202,7 @@ export function FocusView({
             <button
               key={m}
               type="button"
-              onClick={() => handleModeSwitch(m)}
+              onClick={() => onSwitchMode(m)}
               className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap shrink-0 ${
                 mode === m
                   ? themeConfig.activeTabClass
@@ -319,7 +221,6 @@ export function FocusView({
             viewBox="0 0 288 288"
             aria-hidden="true"
           >
-            {/* Background Track Circle */}
             <circle
               cx="144"
               cy="144"
@@ -327,9 +228,8 @@ export function FocusView({
               fill="none"
               stroke="currentColor"
               strokeWidth="10"
-              className=" opacity-15"
+              className="opacity-15"
             />
-            {/* Animated Foreground Progress Circle */}
             <circle
               cx="144"
               cy="144"
@@ -354,7 +254,7 @@ export function FocusView({
               data-testid="timer-countdown"
               className={`text-5xl sm:text-6xl font-bold font-mono tabular-nums tracking-tight my-2 ${themeConfig.textPrimaryClass}`}
             >
-              {formatTime(secondsLeft)}
+              {formatTimeMMSS(remainingSeconds)}
             </div>
 
             {/* 4-Session Long Break Cycle Dots */}
@@ -391,7 +291,7 @@ export function FocusView({
         <div className="flex flex-wrap items-center justify-center gap-3 mt-6">
           <button
             type="button"
-            onClick={() => setIsRunning((prev) => !prev)}
+            onClick={onStartPause}
             className={`px-7 py-3 rounded-xl text-sm font-bold flex items-center gap-2 transition-transform active:scale-95 whitespace-nowrap shrink-0 ${themeConfig.buttonBgClass}`}
           >
             {isRunning ? (
@@ -409,7 +309,7 @@ export function FocusView({
 
           <button
             type="button"
-            onClick={handleReset}
+            onClick={onReset}
             aria-label="Reset timer"
             className={`px-4 py-3 rounded-xl text-sm font-semibold border flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
           >
@@ -419,7 +319,7 @@ export function FocusView({
 
           <button
             type="button"
-            onClick={() => handleCompleteCurrentMode(false)}
+            onClick={onSkip}
             aria-label="Skip current session"
             className={`px-4 py-3 rounded-xl text-sm font-semibold border flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
           >
@@ -429,7 +329,7 @@ export function FocusView({
 
           <button
             type="button"
-            onClick={() => handleCompleteCurrentMode(true)}
+            onClick={onCompleteSessionNow}
             className={`px-4 py-3 rounded-xl text-xs sm:text-sm font-semibold border flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
             title="Complete and log this session now"
           >
@@ -522,7 +422,7 @@ export function FocusView({
             </span>
             <button
               type="button"
-              onClick={() => setLastCompletedToast(null)}
+              onClick={onDismissToast}
               className={`text-xs underline ${themeConfig.textMutedClass}`}
             >
               Dismiss
@@ -567,7 +467,9 @@ export function FocusView({
           {selectedTask && (
             <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/10">
               <div className="flex items-center justify-between text-xs">
-                <span className={`font-semibold ${themeConfig.textPrimaryClass}`}>
+                <span
+                  className={`font-semibold ${themeConfig.textPrimaryClass}`}
+                >
                   {selectedTask.subject}
                 </span>
                 <span
@@ -634,7 +536,7 @@ export function FocusView({
                 Ambient Soundscape
               </h2>
             </div>
-            {activeAmbient && (
+            {(activeAmbient || activeCustomTrackId) && (
               <span className="text-xs font-medium text-emerald-500">
                 Playing
               </span>
@@ -668,6 +570,43 @@ export function FocusView({
               );
             })}
           </div>
+
+          {/* Cloud Tracks from tracks/ collection */}
+          {customTracks.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/10 space-y-2">
+              <div
+                className={`text-[11px] font-semibold ${themeConfig.textMutedClass}`}
+              >
+                Cloud Curated Tracks ({customTracks.length})
+              </div>
+              <div className="space-y-1.5">
+                {customTracks.map((ct) => {
+                  const isPlayingCustom = activeCustomTrackId === ct.id;
+                  return (
+                    <button
+                      key={ct.id}
+                      type="button"
+                      onClick={() => handleToggleCustomTrack(ct)}
+                      aria-pressed={isPlayingCustom}
+                      className={`w-full px-3 py-2 rounded-xl border text-left flex items-center justify-between gap-2 text-xs font-semibold transition-all ${
+                        isPlayingCustom
+                          ? themeConfig.activeTabClass
+                          : `${themeConfig.borderClass} ${themeConfig.textPrimaryClass} bg-white/30 dark:bg-slate-900/30 hover:opacity-90`
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 truncate">
+                        <Music className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">{ct.title}</span>
+                      </span>
+                      <span className="text-[10px] opacity-80 shrink-0">
+                        {ct.category}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 flex items-center gap-3">
             {ambientVolume === 0 ? (

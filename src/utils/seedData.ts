@@ -1,4 +1,8 @@
-import { FocusSessionRecord, StudyTask, UserProfile } from '../types';
+import {
+  FocusSessionRecord,
+  StudyTask,
+  UserProfile,
+} from '../types';
 import { addDays, formatDateKey } from './focusLogic';
 
 export function getInitialProfile(): UserProfile {
@@ -6,7 +10,7 @@ export function getInitialProfile(): UserProfile {
     name: 'Maya Lin',
     majorOrGrade: 'B.S. Computer Science & Physics',
     dailyGoalHours: 3.5,
-    totalXp: 285, // Level 3 Scholar (100 for L1->2, 150 for L2->3 = 250; 35/200 into Level 3)
+    totalXp: 285, // Level 3 Scholar
     theme: 'calm',
     timerSettings: {
       focusMinutes: 25,
@@ -202,13 +206,17 @@ export function getInitialSessions(todayKey?: string): FocusSessionRecord[] {
     },
   ];
 
-  // Add historical sessions across the past 10 weeks for a rich GitHub-style study heatmap
   const historicalOffsets = [
-    -8, -9, -10, -11, -12, -13, -14, // 7-day historical streak
-    -17, -18, -20, -22, -24, -25, -28, -31, -33, -36, -40, -42, -45, -49, -53,
-    -58, -62, -67, -71, -78, -84, -90,
+    -8, -9, -10, -11, -12, -13, -14, -17, -18, -20, -22, -24, -25, -28, -31,
+    -33, -36, -40, -42, -45, -49, -53, -58, -62, -67, -71, -78, -84, -90,
   ];
-  const subjects = ['Physics', 'Computer Science', 'Mathematics', 'Chemistry', 'Economics'];
+  const subjects = [
+    'Physics',
+    'Computer Science',
+    'Mathematics',
+    'Chemistry',
+    'Economics',
+  ];
 
   historicalOffsets.forEach((offset, idx) => {
     const dKey = addDays(base, offset);
@@ -229,3 +237,23 @@ export function getInitialSessions(todayKey?: string): FocusSessionRecord[] {
 
   return records;
 }
+
+export function getInitialCloudTracks() {
+  return [
+    {
+      id: 'track-lofi-study',
+      title: 'Midnight Library Lo-Fi Beats',
+      category: 'Lo-Fi',
+      url: 'https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg',
+      createdAt: '2026-10-20T12:00:00.000Z',
+    },
+    {
+      id: 'track-forest-stream',
+      title: 'Mountain Creek & Pine Canopy',
+      category: 'Nature',
+      url: 'https://actions.google.com/sounds/v1/ambiences/outdoor_summer_ambience.ogg',
+      createdAt: '2026-10-21T12:00:00.000Z',
+    },
+  ];
+}
+

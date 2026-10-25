@@ -2,13 +2,18 @@ import React, { useState } from 'react';
 import {
   Bell,
   Check,
+  Cloud,
+  LogIn,
+  LogOut,
   Palette,
   RotateCcw,
+  ShieldCheck,
   Sliders,
   Trophy,
   User,
 } from 'lucide-react';
 import {
+  CloudUserDoc,
   MoodThemeConfig,
   MoodThemeId,
   UserProfile,
@@ -28,6 +33,11 @@ interface ProfileSettingsViewProps {
   themeConfig: MoodThemeConfig;
   onUpdateProfile: (next: UserProfile) => void;
   onResetDemoData: () => void;
+  cloudUser?: CloudUserDoc;
+  isCloudConnected?: boolean;
+  onGoogleSignIn?: () => void;
+  onSignOut?: () => void;
+  onToggleLocalAdminRole?: () => void;
 }
 
 const ALL_LEVEL_TIERS = [
@@ -45,6 +55,11 @@ export function ProfileSettingsView({
   themeConfig,
   onUpdateProfile,
   onResetDemoData,
+  cloudUser,
+  isCloudConnected = false,
+  onGoogleSignIn,
+  onSignOut,
+  onToggleLocalAdminRole,
 }: ProfileSettingsViewProps) {
   const [nameInput, setNameInput] = useState(profile.name);
   const [majorInput, setMajorInput] = useState(profile.majorOrGrade);
@@ -463,7 +478,88 @@ export function ProfileSettingsView({
         </div>
       </div>
 
-      {/* 4. LocalStorage Data Controls */}
+      {/* 4. Firebase Cloud Sync & Account Role */}
+      {cloudUser && (
+        <div
+          className={`p-5 sm:p-6 rounded-2xl ${themeConfig.glassCardClass} flex flex-wrap items-center justify-between gap-4`}
+        >
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Cloud
+                className="w-4 h-4"
+                style={{ color: themeConfig.accentHex }}
+              />
+              <h3
+                className={`text-sm font-bold ${themeConfig.textPrimaryClass}`}
+                style={{ fontFamily: themeConfig.fontDisplay }}
+              >
+                Firebase Cloud Account & Role
+              </h3>
+              <span
+                className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-bold uppercase ${
+                  cloudUser.role === 'admin'
+                    ? 'bg-amber-500/20 text-amber-600 dark:text-amber-300'
+                    : 'bg-sky-500/15 text-sky-600 dark:text-sky-300'
+                }`}
+              >
+                role: {cloudUser.role}
+              </span>
+            </div>
+            <p className={`text-xs ${themeConfig.textSecondaryClass}`}>
+              Username:{' '}
+              <span className="font-mono font-semibold">
+                @{cloudUser.username}
+              </span>{' '}
+              · Week:{' '}
+              <span className="font-mono font-semibold">
+                {cloudUser.weekKey}
+              </span>{' '}
+              ({isCloudConnected ? 'Connected to Firestore' : 'Local Workspace Mode'})
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            {!isCloudConnected && onToggleLocalAdminRole && (
+              <button
+                type="button"
+                onClick={onToggleLocalAdminRole}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>
+                  {cloudUser.role === 'admin'
+                    ? 'Switch to User Role (Preview)'
+                    : 'Preview Admin Panel Role'}
+                </span>
+              </button>
+            )}
+
+            {isCloudConnected && onSignOut ? (
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-300 flex items-center gap-1.5"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign Out</span>
+              </button>
+            ) : (
+              onGoogleSignIn && (
+                <button
+                  type="button"
+                  onClick={onGoogleSignIn}
+                  className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 ${themeConfig.buttonBgClass}`}
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Sign in with Google</span>
+                </button>
+              )
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 5. LocalStorage Data Controls */}
       <div
         className={`p-5 rounded-2xl ${themeConfig.glassCardClass} flex flex-wrap items-center justify-between gap-4`}
       >
@@ -475,7 +571,7 @@ export function ProfileSettingsView({
             Local Storage Data
           </h3>
           <p className={`text-xs ${themeConfig.textMutedClass}`}>
-            All tasks, Pomodoro sessions, XP, and theme preferences are automatically saved in your browser's localStorage.
+            All tasks, Pomodoro sessions, XP, and theme preferences are automatically saved in your browser's localStorage and synced to Firestore on sign-in.
           </p>
         </div>
         <button

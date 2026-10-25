@@ -1,0 +1,357 @@
+{
+  "entities": {
+    "UserProfileDoc": {
+      "title": "UserProfileDoc",
+      "description": "Public student profile document stored at users/{uid}",
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Student display name"
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Avatar URL from Google Auth"
+        },
+        "username": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 20,
+          "pattern": "^[a-zA-Z0-9_]+$",
+          "description": "Unique student username"
+        },
+        "xp": {
+          "type": "integer",
+          "description": "Total accumulated XP"
+        },
+        "level": {
+          "type": "integer",
+          "description": "Current student level"
+        },
+        "currentStreak": {
+          "type": "integer",
+          "description": "Current daily study streak"
+        },
+        "longestStreak": {
+          "type": "integer",
+          "description": "Longest daily study streak"
+        },
+        "totalMinutes": {
+          "type": "integer",
+          "description": "All-time focused study minutes"
+        },
+        "weeklyMinutes": {
+          "type": "integer",
+          "description": "Focused study minutes in the current ISO week"
+        },
+        "weekKey": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^[0-9]{4}-W[0-9]{2}$",
+          "description": "ISO week identifier such as 2026-W44"
+        },
+        "studyingNow": {
+          "type": "boolean",
+          "description": "Whether the student is currently running a focus session"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"],
+          "description": "Access control role (user by default)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": [
+        "displayName",
+        "photoURL",
+        "username",
+        "xp",
+        "level",
+        "currentStreak",
+        "longestStreak",
+        "totalMinutes",
+        "weeklyMinutes",
+        "weekKey",
+        "studyingNow",
+        "role",
+        "createdAt"
+      ]
+    },
+    "UsernameClaimDoc": {
+      "title": "UsernameClaimDoc",
+      "description": "Unique lowercase username reservation stored at usernames/{usernameLower}",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Owner Firebase Auth UID"
+        }
+      },
+      "required": ["uid"]
+    },
+    "FriendRequestDoc": {
+      "title": "FriendRequestDoc",
+      "description": "Friend request between two students stored at friendRequests/{id}",
+      "type": "object",
+      "properties": {
+        "fromUid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Sender UID"
+        },
+        "toUid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Recipient UID"
+        },
+        "fromUsername": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Sender username for display"
+        },
+        "fromDisplayName": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Sender display name"
+        },
+        "toUsername": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Recipient username for display"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "declined"],
+          "description": "Request status"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Request creation timestamp"
+        }
+      },
+      "required": ["fromUid", "toUid", "status", "createdAt"]
+    },
+    "FriendshipDoc": {
+      "title": "FriendshipDoc",
+      "description": "Confirmed bidirectional friendship stored at friendships/{id}",
+      "type": "object",
+      "properties": {
+        "members": {
+          "type": "array",
+          "description": "Two-element array [uidA, uidB]"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Friendship creation timestamp"
+        }
+      },
+      "required": ["members", "createdAt"]
+    },
+    "StudyRoomDoc": {
+      "title": "StudyRoomDoc",
+      "description": "Collaborative study room stored at rooms/{code}",
+      "type": "object",
+      "properties": {
+        "hostUid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "UID of the room host"
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "List of member UIDs (max 10)"
+        },
+        "maxMembers": {
+          "type": "integer",
+          "description": "Maximum allowed members (10)"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["focus", "shortBreak", "longBreak"],
+          "description": "Current timer mode"
+        },
+        "startedAt": {
+          "type": "integer",
+          "description": "Epoch milliseconds when current timer run started (or null/0 when idle)"
+        },
+        "durationSec": {
+          "type": "integer",
+          "description": "Duration of current session in seconds"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["idle", "running", "paused", "completed"],
+          "description": "Current shared timer status"
+        }
+      },
+      "required": [
+        "hostUid",
+        "memberUids",
+        "maxMembers",
+        "mode",
+        "durationSec",
+        "status"
+      ]
+    },
+    "RoomMemberDoc": {
+      "title": "RoomMemberDoc",
+      "description": "Member presence document stored at rooms/{code}/members/{uid}",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Member display name"
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Member avatar URL"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["focusing", "break", "idle"],
+          "description": "Live member study status"
+        },
+        "joinedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when member joined"
+        }
+      },
+      "required": ["name", "photoURL", "status", "joinedAt"]
+    },
+    "AudioTrackDoc": {
+      "title": "AudioTrackDoc",
+      "description": "Ambient audio track managed by admins at tracks/{id}",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Track title"
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Track category (e.g. Lo-Fi, Nature, Ambient)"
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Direct audio stream/file URL"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["title", "category", "url", "createdAt"]
+    },
+    "PrivateAppStateDoc": {
+      "title": "PrivateAppStateDoc",
+      "description": "User private planner tasks, timer settings, and mood theme at users/{uid}/private/appState",
+      "type": "object",
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "description": "Serialized list of StudyTask objects"
+        },
+        "settings": {
+          "type": "object",
+          "description": "TimerSettings configuration"
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["calm", "cozy", "deep-focus", "fresh", "energetic"],
+          "description": "Selected mood theme"
+        }
+      },
+      "required": ["tasks", "settings", "theme"]
+    },
+    "CloudSessionDoc": {
+      "title": "CloudSessionDoc",
+      "description": "Completed focus session record at users/{uid}/sessions/{id}",
+      "type": "object",
+      "properties": {
+        "minutes": {
+          "type": "integer",
+          "description": "Session duration in minutes"
+        },
+        "subject": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Academic subject"
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "YYYY-MM-DD date string"
+        },
+        "xpAwarded": {
+          "type": "integer",
+          "description": "XP awarded for this session"
+        },
+        "taskTitle": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Optional task title"
+        },
+        "timestamp": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "ISO timestamp"
+        }
+      },
+      "required": ["minutes", "subject", "date", "xpAwarded"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/UserProfileDoc" },
+      "description": "Student public profile for leaderboards, friend lookup, and role verification"
+    },
+    "/usernames/{usernameLower}": {
+      "schema": { "$ref": "#/entities/UsernameClaimDoc" },
+      "description": "Unique lowercase username registry mapping to uid"
+    },
+    "/friendRequests/{id}": {
+      "schema": { "$ref": "#/entities/FriendRequestDoc" },
+      "description": "Pending, accepted, or declined friend requests"
+    },
+    "/friendships/{id}": {
+      "schema": { "$ref": "#/entities/FriendshipDoc" },
+      "description": "Bidirectional friendships containing two member UIDs"
+    },
+    "/rooms/{code}": {
+      "schema": { "$ref": "#/entities/StudyRoomDoc" },
+      "description": "Shared Pomodoro study rooms with max 10 members"
+    },
+    "/rooms/{code}/members/{memberUid}": {
+      "schema": { "$ref": "#/entities/RoomMemberDoc" },
+      "description": "Real-time member presence inside a study room"
+    },
+    "/tracks/{id}": {
+      "schema": { "$ref": "#/entities/AudioTrackDoc" },
+      "description": "Curated ambient audio tracks managed by admins"
+    },
+    "/users/{uid}/private/{docId}": {
+      "schema": { "$ref": "#/entities/PrivateAppStateDoc" },
+      "description": "User-private app state (tasks, timer settings, mood theme)"
+    },
+    "/users/{uid}/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/CloudSessionDoc" },
+      "description": "User-private study session logs"
+    }
+  }
+}

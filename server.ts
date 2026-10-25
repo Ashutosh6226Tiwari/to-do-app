@@ -26,7 +26,7 @@ function getAiClient(): GoogleGenAI {
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '15mb' }));
+  app.use(express.json({ limit: '20mb' }));
 
   // 1. Study Plan Generator (with Google Search grounding support via gemini-3.8-flash)
   app.post('/api/gemini/study-plan', async (req, res) => {
@@ -45,7 +45,6 @@ async function startServer() {
       const ai = getAiClient();
 
       if (useSearch) {
-        // Use Google Search grounding with gemini-3.8-flash to pull real exam curriculum details
         const searchResponse = await ai.models.generateContent({
           model: 'gemini-3.8-flash',
           contents: `You are an academic study planner. The student has the following study goal starting from ${baseDate}: "${goal}".
@@ -327,139 +326,6 @@ Write a warm, personalized weekly insight with:
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Failed to perform grounded search';
-      res.status(500).json({ error: message });
-    }
-  });
-
-  // 6. Convert Text to Speech using gemini-3.8-flash-tts
-  app.post('/api/gemini/tts', async (req, res) => {
-    try {
-      const { text, voiceName } = req.body as {
-        text?: string;
-        voiceName?: string;
-      };
-      if (!text || !text.trim()) {
-        res.status(400).json({ error: 'Text is required for speech synthesis.' });
-        return;
-      }
-
-      const ai = getAiClient();
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash-tts',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: text.slice(0, 1200),
-                speechMetadata: {
-                  style: 'Warm, clear, encouraging academic study coach',
-                },
-              },
-            ],
-          },
-        ],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: voiceName || 'Kore',
-              },
-            },
-          },
-        },
-      });
-
-      const base64Audio =
-        response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (!base64Audio) {
-        res.status(500).json({ error: 'No audio data returned by model.' });
-        return;
-      }
-
-      res.json({
-        audioBase64: base64Audio,
-        mimeType: 'audio/wav',
-      });
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to synthesize speech';
-      res.status(500).json({ error: message });
-    }
-  });
-
-  // 7. Analyze Uploaded Study Images using gemini-4-argon
-  app.post('/api/gemini/analyze-image', async (req, res) => {
-    try {
-      const { imageBase64, mimeType, prompt } = req.body as {
-        imageBase64?: string;
-        mimeType?: string;
-        prompt?: string;
-      };
-      if (!imageBase64) {
-        res.status(400).json({ error: 'Please upload an image to analyze.' });
-        return;
-      }
-
-      const ai = getAiClient();
-      const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-4-argon',
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                mimeType: mimeType || 'image/jpeg',
-                data: cleanBase64,
-              },
-            },
-            {
-              text:
-                prompt && prompt.trim()
-                  ? `${prompt}\n\nAnalyze this study image (notes, textbook page, syllabus, or diagram). Provide a clear summary, key concepts, and suggested Pomodoro study tasks.`
-                  : 'Analyze this study image (notes, textbook page, syllabus, or diagram). Extract a clear summary, key takeaways, and 2 to 4 concrete Pomodoro study tasks the student can add to their planner.',
-            },
-          ],
-        },
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              subject: { type: Type.STRING },
-              summary: { type: Type.STRING },
-              keyConcepts: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
-              },
-              suggestedTasks: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING },
-                    subject: { type: Type.STRING },
-                    estimatedPomodoros: { type: Type.INTEGER },
-                  },
-                  required: ['title', 'subject', 'estimatedPomodoros'],
-                },
-              },
-            },
-            required: ['title', 'subject', 'summary', 'keyConcepts', 'suggestedTasks'],
-          },
-        },
-      });
-
-      const data = JSON.parse(response.text || '{}');
-      res.json(data);
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Failed to analyze image with gemini-4-argon';
       res.status(500).json({ error: message });
     }
   });

@@ -1,12 +1,83 @@
 export type MoodThemeId = 'calm' | 'cozy' | 'deep-focus' | 'fresh' | 'energetic';
 
-export type NavSection = 'planner' | 'focus' | 'stats' | 'settings';
+export type NavSection =
+  | 'planner'
+  | 'focus'
+  | 'friends'
+  | 'rooms'
+  | 'stats'
+  | 'settings'
+  | 'admin';
+
+export type LeaderboardTab = 'weeklyHours' | 'streak' | 'allTimeXp';
 
 export type CalendarViewMode = 'day' | 'week' | 'month';
 
 export type TimerMode = 'focus' | 'shortBreak' | 'longBreak';
 
 export type LevelTitle = 'Beginner' | 'Learner' | 'Scholar' | 'Expert' | 'Master';
+
+export interface CloudUserDoc {
+  uid: string;
+  displayName: string;
+  photoURL: string;
+  username: string;
+  xp: number;
+  level: number;
+  currentStreak: number;
+  longestStreak: number;
+  totalMinutes: number;
+  weeklyMinutes: number;
+  weekKey: string; // e.g. "2026-W44"
+  studyingNow: boolean;
+  role: 'user' | 'admin';
+  createdAt: string;
+}
+
+export interface FriendRequestItem {
+  id: string;
+  fromUid: string;
+  toUid: string;
+  fromUsername?: string;
+  fromDisplayName?: string;
+  toUsername?: string;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: string;
+}
+
+export interface FriendshipItem {
+  id: string;
+  members: [string, string];
+  createdAt: string;
+}
+
+export interface StudyRoomDoc {
+  code: string;
+  hostUid: string;
+  memberUids: string[];
+  maxMembers: number;
+  mode: TimerMode;
+  startedAt: number | null;
+  durationSec: number;
+  status: 'idle' | 'running' | 'paused' | 'completed';
+  createdAt?: string;
+}
+
+export interface RoomMemberItem {
+  uid: string;
+  name: string;
+  photoURL: string;
+  status: 'focusing' | 'break' | 'idle';
+  joinedAt: string;
+}
+
+export interface CloudAudioTrack {
+  id: string;
+  title: string;
+  category: string;
+  url: string;
+  createdAt: string;
+}
 
 export interface SubtaskItem {
   id: string;
@@ -49,6 +120,17 @@ export interface TimerSettings {
   autoSwitchModes: boolean;
   soundAlertEnabled: boolean;
   alertTone: 'chime' | 'bell' | 'marimba';
+}
+
+export interface PersistedTimerState {
+  mode: TimerMode;
+  isRunning: boolean;
+  endTimestamp: number | null;
+  remainingMsWhenPaused: number;
+  completedFocusCycleCount: number;
+  selectedTaskId: string | null;
+  activeRunId: string;
+  lastCompletedRunId: string | null;
 }
 
 export interface UserProfile {
