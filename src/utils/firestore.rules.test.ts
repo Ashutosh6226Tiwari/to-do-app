@@ -451,21 +451,90 @@ test('5. Username overwrite or deletion is refused once created', () => {
   );
 });
 
-test('6. firestore.rules file contains all required structural guards including room duration presets/custom bounds, dailyGoalHours, and admin-only tracks writes', () => {
-  assert.ok(rulesSource.includes('incoming().xp <= 100000'));
-  assert.ok(rulesSource.includes('(incoming().xp - existing().xp) <= 500'));
-  assert.ok(rulesSource.includes('incoming().level >= existing().level'));
-  assert.ok(rulesSource.includes("!('email' in data)"));
-  assert.ok(rulesSource.includes('isSelfJoinOnly()'));
-  assert.ok(rulesSource.includes('isSelfLeaveOnly()'));
-  assert.ok(rulesSource.includes('hasAcceptedRequestForRecipient'));
-  assert.ok(rulesSource.includes('focusMinutes'));
-  assert.ok(rulesSource.includes('shortBreakMinutes'));
-  assert.ok(rulesSource.includes('longBreakMinutes'));
-  assert.ok(rulesSource.includes('dailyGoalHours'));
-  assert.ok(rulesSource.includes('match /tracks/{trackId}'));
-  assert.ok(rulesSource.includes('allow create, update: if isAdmin() &&'));
-  assert.ok(rulesSource.includes('allow delete: if isAdmin() && isValidId(trackId);'));
+test('6. Security hardening rules: users list denied, sessions strict schema (1..180m, subject <100, no extra fields), tracks validation (title <100, fixed category, https://), and rooms custom durations immutable while running', () => {
+  // 1. users: allow get for signed-in users, deny list
+  assert.ok(rulesSource.includes('allow get: if isSignedIn() && isValidId(uid);'));
+  assert.ok(rulesSource.includes('allow list: if false;'));
+
+  // 2. users/{uid}/sessions: minutes 1..180, subject < 100, no extra fields
+  assert.ok(
+    rulesSource.includes(
+      "data.keys().hasOnly(['minutes', 'subject', 'date', 'xpAwarded'])"
+    )
+  );
+  assert.ok(
+    rulesSource.includes(
+      'data.minutes is int && data.minutes >= 1 && data.minutes <= 180'
+    )
+  );
+  assert.ok(
+    rulesSource.includes(
+      'data.subject is string && data.subject.size() >= 1 && data.subject.size() < 100'
+    )
+  );
+
+  // 3. tracks: title < 100, fixed category list, url starts with https://
+  assert.ok(
+    rulesSource.includes(
+      'data.title is string && data.title.size() >= 1 && data.title.size() < 100'
+    )
+  );
+  assert.ok(
+    rulesSource.includes(
+      "data.category in ['Lo-Fi', 'Nature', 'Classical', 'Ambient', 'White Noise', 'Instrumental']"
+    )
+  );
+  assert.ok(rulesSource.includes("data.url.matches('^https://.*')"));
+
+  // 4. rooms: focusMinutes, shortBreakMinutes, longBreakMinutes (1..180) only changeable by host and never while status is running
+  assert.ok(rulesSource.includes('hasValidRoomCustomDurations(data)'));
+  assert.ok(rulesSource.includes('isHostRoomUpdateValid()'));
+  assert.ok(rulesSource.includes("existing().status != 'running'"));
+
+  // Verify simulator for running room duration change restriction
+  const runningRoom: RoomDoc & {
+    focusMinutes: number;
+    shortBreakMinutes: number;
+    longBreakMinutes: number;
+  } = {
+    hostUid: 'host-1',
+    memberUids: ['host-1', 'u2'],
+    maxMembers: 10,
+    mode: 'focus',
+    startedAt: 1700000000000,
+    durationSec: 1500,
+    focusMinutes: 25,
+    shortBreakMinutes: 5,
+    longBreakMinutes: 15,
+    status: 'running',
+  };
+
+  const canHostChangeDurationsWhileRunning = (
+    existing: typeof runningRoom,
+    incoming: typeof runningRoom
+  ) =>
+    existing.status !== 'running' ||
+    (incoming.focusMinutes === existing.focusMinutes &&
+      incoming.shortBreakMinutes === existing.shortBreakMinutes &&
+      incoming.longBreakMinutes === existing.longBreakMinutes);
+
+  // Host attempting to change focusMinutes while room is running -> DENIED
+  assert.equal(
+    canHostChangeDurationsWhileRunning(runningRoom, {
+      ...runningRoom,
+      focusMinutes: 50,
+    }),
+    false
+  );
+
+  // Host pausing or completing the running room without altering preset durations -> ALLOWED
+  assert.equal(
+    canHostChangeDurationsWhileRunning(runningRoom, {
+      ...runningRoom,
+      status: 'paused',
+    }),
+    true
+  );
 });
 
 

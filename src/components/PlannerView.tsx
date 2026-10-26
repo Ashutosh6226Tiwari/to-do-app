@@ -20,7 +20,11 @@ import {
   StudyTask,
   SubtaskItem,
 } from '../types';
-import { addDays, formatDateKey } from '../utils/focusLogic';
+import {
+  addDays,
+  formatDateKey,
+  sanitizePlainText,
+} from '../utils/focusLogic';
 import { TASK_COLORS } from '../utils/themes';
 import {
   breakDownTaskWithGemini,
@@ -117,36 +121,39 @@ export function PlannerView({
 
   const handleSaveTask = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!titleInput.trim()) {
-      setFormError('Please enter a task title.');
+    const safeTitle = sanitizePlainText(titleInput, 120);
+    const safeSubject = sanitizePlainText(subjectInput, 99);
+    const safeNotes = sanitizePlainText(notesInput, 500);
+    if (!safeTitle) {
+      setFormError('Please enter a valid task title.');
       return;
     }
-    if (!subjectInput.trim()) {
-      setFormError('Please enter a subject name.');
+    if (!safeSubject) {
+      setFormError('Please enter a valid subject name.');
       return;
     }
 
     if (editingTask) {
       onUpdateTask({
         ...editingTask,
-        title: titleInput.trim(),
-        subject: subjectInput.trim(),
+        title: safeTitle,
+        subject: safeSubject,
         date: dateInput,
         time: timeInput,
         color: colorInput,
         estimatedPomodoros: Math.max(1, Number(pomodorosInput) || 1),
-        notes: notesInput.trim(),
+        notes: safeNotes,
       });
     } else {
       onAddTask({
-        title: titleInput.trim(),
-        subject: subjectInput.trim(),
+        title: safeTitle,
+        subject: safeSubject,
         date: dateInput,
         time: timeInput,
         color: colorInput,
         estimatedPomodoros: Math.max(1, Number(pomodorosInput) || 1),
         completed: false,
-        notes: notesInput.trim(),
+        notes: safeNotes,
       });
     }
     setIsTaskModalOpen(false);

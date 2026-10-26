@@ -243,4 +243,72 @@ test('room adjustable timer custom minutes clamping (1..180) and daily goal hour
   });
 });
 
+test('security hardening: sanitizePlainText strips HTML/scripts, isValidHttpsAudioUrl enforces https://, and evaluatePerUserRateLimit enforces 20 req/min cap', async () => {
+  const {
+    sanitizePlainText,
+    isValidHttpsAudioUrl,
+    evaluatePerUserRateLimit,
+    ALLOWED_TRACK_CATEGORIES,
+  } = await import('./focusLogic');
+
+  // HTML and script injection stripping
+  assert.equal(
+    sanitizePlainText('<script>alert("xss")</script>Calculus II <b>Notes</b>', 100),
+    'Calculus II Notes'
+  );
+  assert.equal(
+    sanitizePlainText('javascript:alert(1) <img src=x onerror=alert(1)>Room', 80),
+    'alert(1) Room'
+  );
+  assert.equal(sanitizePlainText('A'.repeat(150), 99).length, 99);
+
+  // Audio URL validation
+  assert.equal(
+    isValidHttpsAudioUrl(
+      'https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg'
+    ),
+    true
+  );
+  assert.equal(
+    isValidHttpsAudioUrl('http://insecure.example.com/audio.mp3'),
+    false
+  );
+  assert.equal(isValidHttpsAudioUrl('javascript:alert(1)'), false);
+  assert.equal(
+    isValidHttpsAudioUrl('https://example.com/audio.mp3"><script>'),
+    false
+  );
+  assert.equal(isValidHttpsAudioUrl('https://localhost/audio.mp3'), false);
+
+  // Allowed track categories fixed list
+  assert.ok(ALLOWED_TRACK_CATEGORIES.includes('Lo-Fi'));
+  assert.ok(ALLOWED_TRACK_CATEGORIES.includes('Nature'));
+
+  // Per-user rate limiter (20 requests per 60,000 ms)
+  const buckets = new Map<string, number[]>();
+  const t0 = 1_700_000_000_000;
+  for (let i = 0; i < 20; i++) {
+    const res = evaluatePerUserRateLimit(buckets, 'user-123', t0 + i * 100);
+    assert.equal(res.allowed, true);
+    assert.equal(res.remaining, 20 - (i + 1));
+  }
+  // 21st request within the same minute is blocked
+  const blocked = evaluatePerUserRateLimit(buckets, 'user-123', t0 + 5_000);
+  assert.equal(blocked.allowed, false);
+  assert.equal(blocked.remaining, 0);
+  assert.ok(blocked.retryAfterSec > 0);
+
+  // Another user is unaffected
+  const otherUser = evaluatePerUserRateLimit(buckets, 'user-456', t0 + 5_000);
+  assert.equal(otherUser.allowed, true);
+
+  // After 60 seconds window expires, user-123 is allowed again
+  const afterWindow = evaluatePerUserRateLimit(
+    buckets,
+    'user-123',
+    t0 + 61_000
+  );
+  assert.equal(afterWindow.allowed, true);
+});
+
 

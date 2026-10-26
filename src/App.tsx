@@ -55,9 +55,11 @@ import {
   getLevelInfo,
   getModeDurationMinutes,
   getModeDurationMs,
+  isValidHttpsAudioUrl,
   normalizeWeeklyMinutes,
   pauseTimerState,
   resetTimerState,
+  sanitizePlainText,
   startTimerState,
   switchTimerModeState,
 } from './utils/focusLogic';
@@ -1085,6 +1087,11 @@ export default function App() {
   ) => {
     const newTask: StudyTask = {
       ...newTaskData,
+      title: sanitizePlainText(newTaskData.title, 120) || 'Study Task',
+      subject: sanitizePlainText(newTaskData.subject, 99) || 'General Study',
+      notes: newTaskData.notes
+        ? sanitizePlainText(newTaskData.notes, 500)
+        : undefined,
       id: `task-${Date.now()}`,
       completedPomodoros: 0,
     };
@@ -1100,6 +1107,9 @@ export default function App() {
   ) => {
     const created: StudyTask[] = items.map((item, idx) => ({
       ...item,
+      title: sanitizePlainText(item.title, 120) || 'Study Task',
+      subject: sanitizePlainText(item.subject, 99) || 'General Study',
+      notes: item.notes ? sanitizePlainText(item.notes, 500) : undefined,
       id: `task-${Date.now()}-${idx}`,
       completedPomodoros: 0,
     }));
@@ -1111,8 +1121,16 @@ export default function App() {
   };
 
   const handleUpdateTask = (updated: StudyTask) => {
+    const sanitizedUpdated: StudyTask = {
+      ...updated,
+      title: sanitizePlainText(updated.title, 120) || 'Study Task',
+      subject: sanitizePlainText(updated.subject, 99) || 'General Study',
+      notes: updated.notes ? sanitizePlainText(updated.notes, 500) : undefined,
+    };
     setTasks((prev) => {
-      const next = prev.map((t) => (t.id === updated.id ? updated : t));
+      const next = prev.map((t) =>
+        t.id === sanitizedUpdated.id ? sanitizedUpdated : t
+      );
       syncTasksAndProfileIfNeeded(next, profile);
       return next;
     });
@@ -1497,17 +1515,26 @@ export default function App() {
       createdAt?: string;
     }
   ) => {
+    const safeTitle = sanitizePlainText(trackInput.title, 99);
+    const trimmedUrl = trackInput.url.trim();
+    if (!safeTitle || !isValidHttpsAudioUrl(trimmedUrl)) {
+      throw new Error('Invalid track title or non-HTTPS audio URL.');
+    }
     if (firebaseUser && !needsUsernameClaim) {
-      await saveCloudTrack(trackInput);
+      await saveCloudTrack({
+        ...trackInput,
+        title: safeTitle,
+        url: trimmedUrl,
+      });
       return;
     }
     const id = trackInput.id || `track-${Date.now()}`;
     const createdAt = trackInput.createdAt || new Date().toISOString();
     const item: CloudAudioTrack = {
       id,
-      title: trackInput.title,
-      category: trackInput.category,
-      url: trackInput.url,
+      title: safeTitle,
+      category: sanitizePlainText(trackInput.category, 50) || 'Ambient',
+      url: trimmedUrl,
       createdAt,
     };
     setCustomTracks((prev) => {
@@ -1896,12 +1923,16 @@ export default function App() {
               hoursToday={stats.hoursToday}
               themeConfig={themeConfig}
               onUpdateProfile={(nextProfile) => {
-                setProfile(nextProfile);
-                syncTasksAndProfileIfNeeded(tasks, nextProfile);
+                const safeNextProfile: UserProfile = {
+                  ...nextProfile,
+                  name: sanitizePlainText(nextProfile.name, 80) || 'Student',
+                };
+                setProfile(safeNextProfile);
+                syncTasksAndProfileIfNeeded(tasks, safeNextProfile);
                 if (!timerState.isRunning) {
                   const nextMs = getModeDurationMs(
                     timerState.mode,
-                    nextProfile.timerSettings
+                    safeNextProfile.timerSettings
                   );
                   setTimerState((prev) => ({
                     ...prev,

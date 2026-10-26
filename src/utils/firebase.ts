@@ -30,10 +30,14 @@ import {
   UserProfile,
 } from '../types';
 import {
+  ALLOWED_TRACK_CATEGORIES,
+  AllowedTrackCategory,
   clampRoomCustomMinutes,
   getIsoWeekKey,
   getLevelInfo,
+  isValidHttpsAudioUrl,
   normalizeWeeklyMinutes,
+  sanitizePlainText,
   validateUsername,
 } from './focusLogic';
 
@@ -236,10 +240,14 @@ export async function claimUsernameAndInitializeCloudUser(params: {
   const level = getLevelInfo(localProfile.totalXp).level;
   const nowIso = new Date().toISOString();
 
+  const safeDisplayName =
+    sanitizePlainText(displayName || localProfile.name || 'Student', 80) ||
+    'Student';
+
   const userDocData: Omit<CloudUserDoc, 'uid'> = {
-    displayName: (displayName || localProfile.name || 'Student').slice(0, 80),
+    displayName: safeDisplayName,
     photoURL: (photoURL || '').slice(0, 500),
-    username: rawUsername.trim(),
+    username: sanitizePlainText(rawUsername.trim(), 20),
     xp: Math.max(0, Math.min(100000, Math.floor(localProfile.totalXp))),
     level: Math.max(1, level),
     currentStreak: Math.max(0, Math.min(3650, Math.floor(currentStreak))),
@@ -273,17 +281,18 @@ export async function claimUsernameAndInitializeCloudUser(params: {
   });
 
   // Migrate up to 25 recent local sessions into users/{uid}/sessions/{id}
+  // Strictly only { minutes (1..180), subject (<100 chars), date, xpAwarded } - no extra fields
   const sessionsToMigrate = localSessions.slice(0, 25);
   for (const s of sessionsToMigrate) {
     const safeId = s.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
     const sessRef = doc(db, 'users', uid, 'sessions', safeId);
+    const safeSubject =
+      sanitizePlainText(s.subject || 'General Study', 99) || 'General Study';
     batch.set(sessRef, {
-      minutes: Math.max(1, Math.min(300, Math.floor(s.durationMinutes))),
-      subject: (s.subject || 'General Study').slice(0, 80),
+      minutes: Math.max(1, Math.min(180, Math.floor(s.durationMinutes))),
+      subject: safeSubject,
       date: s.date.slice(0, 10),
       xpAwarded: Math.max(0, Math.min(500, Math.floor(s.xpEarned))),
-      taskTitle: (s.taskTitle || 'Focus Session').slice(0, 160),
-      timestamp: (s.timestamp || nowIso).slice(0, 40),
     });
   }
 
@@ -354,8 +363,12 @@ export async function updateCloudUserProgress(
     Math.min(3650, Math.floor(updates.currentStreak ?? existingDoc.currentStreak))
   );
 
+  const safeDisplayName =
+    sanitizePlainText(updates.displayName || existingDoc.displayName, 80) ||
+    existingDoc.displayName;
+
   const payload: Omit<CloudUserDoc, 'uid'> = {
-    displayName: (updates.displayName || existingDoc.displayName).slice(0, 80),
+    displayName: safeDisplayName,
     photoURL: existingDoc.photoURL,
     username: existingDoc.username,
     xp: nextXp,
@@ -390,6 +403,7 @@ export async function updateCloudUserProgress(
 
 /**
  * Logs a completed focus session to users/{uid}/sessions/{sessionId}.
+ * Strictly validates minutes (1..180), subject (<100 chars), date, xpAwarded, and no extra fields.
  */
 export async function logCloudSession(
   uid: string,
@@ -397,14 +411,15 @@ export async function logCloudSession(
 ): Promise<void> {
   const safeId = session.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
   const path = `users/${uid}/sessions/${safeId}`;
+  const safeSubject =
+    sanitizePlainText(session.subject || 'General Study', 99) ||
+    'General Study';
   try {
     await setDoc(doc(db, 'users', uid, 'sessions', safeId), {
-      minutes: Math.max(1, Math.min(300, Math.floor(session.durationMinutes))),
-      subject: (session.subject || 'General Study').slice(0, 80),
+      minutes: Math.max(1, Math.min(180, Math.floor(session.durationMinutes))),
+      subject: safeSubject,
       date: session.date.slice(0, 10),
       xpAwarded: Math.max(0, Math.min(500, Math.floor(session.xpEarned))),
-      taskTitle: (session.taskTitle || 'Focus Session').slice(0, 160),
-      timestamp: (session.timestamp || new Date().toISOString()).slice(0, 40),
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
@@ -413,11 +428,14 @@ export async function logCloudSession(
 
 /**
  * Searches for a user by exact username (via usernames/{usernameLower} -> users/{uid}).
+ * Uses getDoc by uid so enumeration/list on users is never required.
  */
 export async function findUserByUsername(
   rawQuery: string
 ): Promise<CloudUserDoc | null> {
-  const usernameLower = rawQuery.trim().toLowerCase().replace(/^@/, '');
+  const usernameLower = sanitizePlainText(rawQuery, 30)
+    .toLowerCase()
+    .replace(/^@/, '');
   if (!usernameLower || usernameLower.length < 3) return null;
 
   try {
@@ -484,9 +502,9 @@ export async function sendCloudFriendRequest(
     await setDoc(doc(db, 'friendRequests', requestId), {
       fromUid: me.uid,
       toUid: target.uid,
-      fromUsername: me.username,
-      fromDisplayName: me.displayName,
-      toUsername: target.username,
+      fromUsername: sanitizePlainText(me.username, 20),
+      fromDisplayName: sanitizePlainText(me.displayName, 80),
+      toUsername: sanitizePlainText(target.username, 20),
       status: 'pending',
       createdAt: new Date().toISOString(),
     });
@@ -557,7 +575,9 @@ export async function createCloudStudyRoom(
     longBreakMinutes?: number;
   }
 ): Promise<StudyRoomDoc> {
-  const cleanCode = code.trim().toUpperCase();
+  const cleanCode = sanitizePlainText(code, 6)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
   const focusMinutes = clampRoomCustomMinutes(
     roomDurations?.focusMinutes ?? Math.round(durationSec / 60)
   );
@@ -585,8 +605,8 @@ export async function createCloudStudyRoom(
     const batch = writeBatch(db);
     batch.set(doc(db, 'rooms', cleanCode), roomData);
     batch.set(doc(db, 'rooms', cleanCode, 'members', host.uid), {
-      name: host.displayName,
-      photoURL: host.photoURL || '',
+      name: sanitizePlainText(host.displayName, 80) || 'Student',
+      photoURL: (host.photoURL || '').slice(0, 500),
       status: 'idle',
       joinedAt: new Date().toISOString(),
     });
@@ -604,7 +624,9 @@ export async function joinCloudStudyRoom(
   rawCode: string,
   member: CloudUserDoc
 ): Promise<StudyRoomDoc> {
-  const cleanCode = rawCode.trim().toUpperCase();
+  const cleanCode = sanitizePlainText(rawCode, 6)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
   if (cleanCode.length !== 6) {
     throw new Error('Room code must be 6 characters.');
   }
@@ -626,8 +648,8 @@ export async function joinCloudStudyRoom(
     }
 
     await setDoc(doc(db, 'rooms', cleanCode, 'members', member.uid), {
-      name: member.displayName,
-      photoURL: member.photoURL || '',
+      name: sanitizePlainText(member.displayName, 80) || 'Student',
+      photoURL: (member.photoURL || '').slice(0, 500),
       status:
         data.status === 'running'
           ? data.mode === 'focus'
@@ -657,7 +679,9 @@ export async function leaveCloudStudyRoom(
   uid: string,
   currentMemberUids: string[]
 ): Promise<void> {
-  const cleanCode = code.trim().toUpperCase();
+  const cleanCode = sanitizePlainText(code, 6)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
   try {
     await deleteDoc(doc(db, 'rooms', cleanCode, 'members', uid));
     const remaining = currentMemberUids.filter((id) => id !== uid);
@@ -671,6 +695,7 @@ export async function leaveCloudStudyRoom(
 
 /**
  * Host updates the shared Study Room timer (writing startedAt, durationSec, mode, status, and optional custom durations).
+ * Enforces that focusMinutes, shortBreakMinutes, and longBreakMinutes cannot be changed while status is 'running'.
  */
 export async function updateCloudRoomTimer(
   code: string,
@@ -685,15 +710,25 @@ export async function updateCloudRoomTimer(
     status?: 'idle' | 'running' | 'paused' | 'completed';
   }
 ): Promise<void> {
-  const cleanCode = code.trim().toUpperCase();
+  const cleanCode = sanitizePlainText(code, 6)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+  const isCurrentlyRunning = room.status === 'running';
   const focusMinutes = clampRoomCustomMinutes(
-    patch.focusMinutes ?? room.focusMinutes ?? 25
+    isCurrentlyRunning
+      ? room.focusMinutes ?? 25
+      : patch.focusMinutes ?? room.focusMinutes ?? 25
   );
   const shortBreakMinutes = clampRoomCustomMinutes(
-    patch.shortBreakMinutes ?? room.shortBreakMinutes ?? 5
+    isCurrentlyRunning
+      ? room.shortBreakMinutes ?? 5
+      : patch.shortBreakMinutes ?? room.shortBreakMinutes ?? 5
   );
   const longBreakMinutes = clampRoomCustomMinutes(
-    patch.longBreakMinutes ?? room.longBreakMinutes ?? 15
+    isCurrentlyRunning
+      ? room.longBreakMinutes ?? 15
+      : patch.longBreakMinutes ?? room.longBreakMinutes ?? 15
   );
   const nextPayload: Omit<StudyRoomDoc, 'code'> = {
     hostUid: room.hostUid,
@@ -730,11 +765,13 @@ export async function updateCloudRoomMemberStatus(
   member: { uid: string; name: string; photoURL: string; joinedAt: string },
   status: 'focusing' | 'break' | 'idle'
 ): Promise<void> {
-  const cleanCode = code.trim().toUpperCase();
+  const cleanCode = sanitizePlainText(code, 6)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
   const path = `rooms/${cleanCode}/members/${member.uid}`;
   try {
     await setDoc(doc(db, 'rooms', cleanCode, 'members', member.uid), {
-      name: member.name.slice(0, 80),
+      name: sanitizePlainText(member.name, 80) || 'Student',
       photoURL: (member.photoURL || '').slice(0, 500),
       status,
       joinedAt: member.joinedAt,
@@ -746,6 +783,7 @@ export async function updateCloudRoomMemberStatus(
 
 /**
  * Admin CRUD for tracks/{id}.
+ * Validates title (< 100 chars), category from ALLOWED_TRACK_CATEGORIES, and HTTPS audio URL.
  */
 export async function saveCloudTrack(
   track: Omit<CloudAudioTrack, 'id' | 'createdAt'> & {
@@ -753,12 +791,26 @@ export async function saveCloudTrack(
     createdAt?: string;
   }
 ): Promise<CloudAudioTrack> {
+  const safeTitle = sanitizePlainText(track.title, 99);
+  if (!safeTitle) {
+    throw new Error('Track title is required (max 99 characters).');
+  }
+  const safeCategory: AllowedTrackCategory = ALLOWED_TRACK_CATEGORIES.includes(
+    track.category as AllowedTrackCategory
+  )
+    ? (track.category as AllowedTrackCategory)
+    : 'Ambient';
+  const trimmedUrl = track.url.trim();
+  if (!isValidHttpsAudioUrl(trimmedUrl)) {
+    throw new Error('Audio URL must be a valid https:// URL.');
+  }
+
   const id = track.id || `track-${Date.now()}`;
   const createdAt = track.createdAt || new Date().toISOString();
   const payload = {
-    title: track.title.trim().slice(0, 100),
-    category: track.category.trim().slice(0, 50),
-    url: track.url.trim().slice(0, 500),
+    title: safeTitle,
+    category: safeCategory,
+    url: trimmedUrl,
     createdAt,
   };
   try {
@@ -778,3 +830,4 @@ export async function deleteCloudTrack(trackId: string): Promise<void> {
 }
 
 export { collection, doc, getDoc, getDocs };
+

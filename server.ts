@@ -1,13 +1,269 @@
 import 'dotenv/config';
-import express from 'express';
+import express, {
+  type NextFunction,
+  type Request,
+  type Response,
+} from 'express';
+import { createVerify } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from '@google/genai';
 
+function sanitizePlainText(rawInput: unknown, maxLength: number = 120): string {
+  if (typeof rawInput !== 'string') return '';
+  const withoutScripts = rawInput
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<\/?[a-z][^>]*>/gi, '')
+    .replace(/[<>]/g, '')
+    .replace(/javascript\s*:/gi, '')
+    .replace(/vbscript\s*:/gi, '')
+    .replace(/data\s*:\s*text\/html/gi, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+
+  return withoutScripts.trim().slice(0, Math.max(1, maxLength));
+}
+
+function evaluatePerUserRateLimit(
+  buckets: Map<string, number[]>,
+  userKey: string,
+  nowMs: number,
+  windowMs: number = 60_000,
+  maxRequests: number = 20
+): { allowed: boolean; remaining: number; retryAfterSec: number } {
+  const cutoff = nowMs - windowMs;
+  const existing = buckets.get(userKey) || [];
+  const activeTimestamps = existing.filter((t) => t > cutoff);
+
+  if (activeTimestamps.length >= maxRequests) {
+    buckets.set(userKey, activeTimestamps);
+    const oldest = activeTimestamps[0] ?? nowMs;
+    const retryAfterSec = Math.max(
+      1,
+      Math.ceil((oldest + windowMs - nowMs) / 1000)
+    );
+    return {
+      allowed: false,
+      remaining: 0,
+      retryAfterSec,
+    };
+  }
+
+  activeTimestamps.push(nowMs);
+  buckets.set(userKey, activeTimestamps);
+  return {
+    allowed: true,
+    remaining: Math.max(0, maxRequests - activeTimestamps.length),
+    retryAfterSec: 0,
+  };
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const firebaseConfigPath = path.resolve(
+  __dirname,
+  'firebase-applet-config.json'
+);
+const firebaseConfigRaw = fs.existsSync(firebaseConfigPath)
+  ? JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf8'))
+  : {};
+const FIREBASE_PROJECT_ID: string =
+  process.env.FIREBASE_PROJECT_ID ||
+  firebaseConfigRaw.projectId ||
+  'distributed-xanthometer-25v9p';
+const FIREBASE_WEB_API_KEY: string = firebaseConfigRaw.apiKey || '';
+
+const GOOGLE_CERTS_URL =
+  'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
+let cachedGoogleCerts: { certs: Record<string, string>; expiresAt: number } = {
+  certs: {},
+  expiresAt: 0,
+};
+
+async function getGooglePublicCerts(): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (
+    cachedGoogleCerts.expiresAt > now &&
+    Object.keys(cachedGoogleCerts.certs).length > 0
+  ) {
+    return cachedGoogleCerts.certs;
+  }
+  const res = await fetch(GOOGLE_CERTS_URL);
+  if (!res.ok) {
+    throw new Error('Failed to fetch Google public certificates.');
+  }
+  const certs = (await res.json()) as Record<string, string>;
+  cachedGoogleCerts = {
+    certs,
+    expiresAt: now + 50 * 60 * 1000,
+  };
+  return certs;
+}
+
+function decodeBase64UrlJson<T>(segment: string): T {
+  const json = Buffer.from(segment, 'base64url').toString('utf8');
+  return JSON.parse(json) as T;
+}
+
+/**
+ * Verifies a Firebase Auth ID token on the server:
+ * 1. Validates JWT header (alg === 'RS256', kid present) and claims (aud, iss, sub, exp).
+ * 2. Verifies RSA-SHA256 cryptographic signature against Google's securetoken x509 public certs
+ *    (with fallback to Identity Toolkit accounts:lookup if needed).
+ */
+export async function verifyFirebaseIdToken(
+  idToken: string
+): Promise<{ uid: string }> {
+  const parts = idToken.split('.');
+  if (parts.length !== 3) {
+    throw new Error('Malformed Firebase ID token.');
+  }
+
+  const header = decodeBase64UrlJson<{ alg?: string; kid?: string }>(parts[0]);
+  const payload = decodeBase64UrlJson<{
+    aud?: string;
+    iss?: string;
+    sub?: string;
+    user_id?: string;
+    exp?: number;
+    iat?: number;
+  }>(parts[1]);
+
+  if (header.alg !== 'RS256' || !header.kid) {
+    throw new Error('Invalid token algorithm or missing key ID.');
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (!payload.exp || payload.exp <= nowSec) {
+    throw new Error('Firebase ID token has expired.');
+  }
+  if (payload.iat && payload.iat > nowSec + 300) {
+    throw new Error('Firebase ID token issued in the future.');
+  }
+  if (payload.aud !== FIREBASE_PROJECT_ID) {
+    throw new Error('Invalid token audience.');
+  }
+  if (
+    payload.iss !== `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`
+  ) {
+    throw new Error('Invalid token issuer.');
+  }
+
+  const uid = payload.sub || payload.user_id || '';
+  if (!uid || typeof uid !== 'string' || uid.length > 128) {
+    throw new Error('Invalid token subject (uid).');
+  }
+
+  try {
+    const certs = await getGooglePublicCerts();
+    const certPem = certs[header.kid];
+    if (!certPem) {
+      throw new Error('Matching public certificate not found for kid.');
+    }
+    const verifier = createVerify('RSA-SHA256');
+    verifier.update(`${parts[0]}.${parts[1]}`);
+    verifier.end();
+    const signatureValid = verifier.verify(
+      certPem,
+      Buffer.from(parts[2], 'base64url')
+    );
+    if (!signatureValid) {
+      throw new Error('Invalid Firebase ID token cryptographic signature.');
+    }
+    return { uid };
+  } catch (certErr) {
+    if (!FIREBASE_WEB_API_KEY) {
+      throw certErr;
+    }
+    const lookupRes = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(
+        FIREBASE_WEB_API_KEY
+      )}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      }
+    );
+    if (!lookupRes.ok) {
+      throw new Error('Firebase ID token verification failed.');
+    }
+    const lookupData = (await lookupRes.json()) as {
+      users?: Array<{ localId?: string }>;
+    };
+    const verifiedUid = lookupData.users?.[0]?.localId;
+    if (!verifiedUid || verifiedUid !== uid) {
+      throw new Error('Firebase ID token user mismatch.');
+    }
+    return { uid: verifiedUid };
+  }
+}
+
+// Per-user rate limiting: max 20 requests per 60 seconds per authenticated uid
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS = 20;
+const userRateLimitBuckets = new Map<string, number[]>();
+
+interface AuthenticatedRequest extends Request {
+  authenticatedUid?: string;
+}
+
+async function requireAuthenticatedRateLimitedUser(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader.startsWith('Bearer ')) {
+    res.status(401).json({
+      error: 'Authentication required. Please sign in to use AI study tools.',
+    });
+    return;
+  }
+
+  const idToken = authHeader.slice('Bearer '.length).trim();
+  if (!idToken) {
+    res.status(401).json({ error: 'Missing Firebase ID token.' });
+    return;
+  }
+
+  try {
+    const { uid } = await verifyFirebaseIdToken(idToken);
+    req.authenticatedUid = uid;
+
+    const rateResult = evaluatePerUserRateLimit(
+      userRateLimitBuckets,
+      uid,
+      Date.now(),
+      RATE_LIMIT_WINDOW_MS,
+      RATE_LIMIT_MAX_REQUESTS
+    );
+
+    res.setHeader('X-RateLimit-Limit', String(RATE_LIMIT_MAX_REQUESTS));
+    res.setHeader('X-RateLimit-Remaining', String(rateResult.remaining));
+
+    if (!rateResult.allowed) {
+      res.setHeader('Retry-After', String(rateResult.retryAfterSec));
+      res.status(429).json({
+        error: `Rate limit exceeded (max ${RATE_LIMIT_MAX_REQUESTS} AI requests per minute). Please wait ${rateResult.retryAfterSec}s.`,
+      });
+      return;
+    }
+
+    next();
+  } catch (err) {
+    res.status(401).json({
+      error:
+        err instanceof Error
+          ? err.message
+          : 'Invalid or expired Firebase ID token.',
+    });
+  }
+}
+
 function getAiClient(): GoogleGenAI {
+  // GEMINI_API_KEY is read strictly from server environment secrets, never sent to the browser
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
     throw new Error(
@@ -26,22 +282,28 @@ function getAiClient(): GoogleGenAI {
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '20mb' }));
+  app.use(express.json({ limit: '2mb' }));
+
+  // Require verified Firebase ID token and 20 req/min per-user rate limit on all /api/gemini/* endpoints
+  app.use('/api/gemini', requireAuthenticatedRateLimitedUser);
 
   // 1. Study Plan Generator (with Google Search grounding support via gemini-3.8-flash)
   app.post('/api/gemini/study-plan', async (req, res) => {
     try {
-      const { goal, startDate, useSearch } = req.body as {
+      const { goal: rawGoal, startDate, useSearch } = req.body as {
         goal?: string;
         startDate?: string;
         useSearch?: boolean;
       };
-      if (!goal || !goal.trim()) {
+      const goal = sanitizePlainText(rawGoal, 300);
+      if (!goal) {
         res.status(400).json({ error: 'Please describe your study goal.' });
         return;
       }
 
-      const baseDate = startDate || new Date().toISOString().slice(0, 10);
+      const baseDate =
+        sanitizePlainText(startDate, 20) ||
+        new Date().toISOString().slice(0, 10);
       const ai = getAiClient();
 
       if (useSearch) {

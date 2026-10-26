@@ -1,23 +1,20 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Global default-deny safety net
-    match /{document=**} {
-      allow read, write: if false;
-    }
 
-    // Core helper primitives
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isOwner(uid) {
-      return isSignedIn() && request.auth.uid == uid;
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
     }
 
     function isValidId(id) {
-      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() >= 1 && id.size() <= 128;
     }
 
     function incoming() {
@@ -34,112 +31,209 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
-    // Validation Blueprint: UserProfileDoc (users/{uid})
-    // Strictly public fields only — email is never permitted in users/{uid}.
-    function isValidUserProfile(data) {
+    // ===============================================================
+    // 1. users/{uid}
+    // ===============================================================
+    function hasAllowedUserFieldsOnly(data) {
       return data.keys().hasAll([
-          'displayName',
-          'photoURL',
-          'username',
-          'xp',
-          'level',
-          'currentStreak',
-          'longestStreak',
-          'totalMinutes',
-          'weeklyMinutes',
-          'weekKey',
-          'studyingNow',
-          'role',
-          'createdAt'
-        ]) &&
-        data.keys().hasOnly([
-          'displayName',
-          'photoURL',
-          'username',
-          'xp',
-          'level',
-          'currentStreak',
-          'longestStreak',
-          'totalMinutes',
-          'weeklyMinutes',
-          'weekKey',
-          'studyingNow',
-          'role',
-          'createdAt'
-        ]) &&
-        !('email' in data) &&
+        'displayName',
+        'photoURL',
+        'username',
+        'xp',
+        'level',
+        'currentStreak',
+        'longestStreak',
+        'totalMinutes',
+        'weeklyMinutes',
+        'weekKey',
+        'studyingNow',
+        'role',
+        'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'displayName',
+        'photoURL',
+        'username',
+        'xp',
+        'level',
+        'currentStreak',
+        'longestStreak',
+        'totalMinutes',
+        'weeklyMinutes',
+        'weekKey',
+        'studyingNow',
+        'role',
+        'createdAt'
+      ]) &&
+      !('email' in data);
+    }
+
+    function hasValidUserFieldTypesAndBounds(data) {
+      return hasAllowedUserFieldsOnly(data) &&
         data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
         data.photoURL is string && data.photoURL.size() <= 500 &&
         data.username is string && data.username.size() >= 3 && data.username.size() <= 20 &&
-        data.username.matches('^[a-zA-Z0-9_]+$') &&
         data.xp is int && data.xp >= 0 && data.xp <= 10000000 &&
         data.level is int && data.level >= 1 && data.level <= 500 &&
         data.currentStreak is int && data.currentStreak >= 0 && data.currentStreak <= 3650 &&
-        data.longestStreak is int && data.longestStreak >= 0 && data.longestStreak <= 3650 &&
-        data.longestStreak >= data.currentStreak &&
+        data.longestStreak is int && data.longestStreak >= data.currentStreak && data.longestStreak <= 3650 &&
         data.totalMinutes is int && data.totalMinutes >= 0 && data.totalMinutes <= 5256000 &&
         data.weeklyMinutes is int && data.weeklyMinutes >= 0 && data.weeklyMinutes <= 10080 &&
-        data.weekKey is string && data.weekKey.size() >= 6 && data.weekKey.size() <= 16 &&
-        data.weekKey.matches('^[0-9]{4}-W[0-9]{2}$') &&
+        data.weekKey is string && data.weekKey.size() >= 6 && data.weekKey.size() <= 12 &&
         data.studyingNow is bool &&
         data.role in ['user', 'admin'] &&
         data.createdAt is string && data.createdAt.size() <= 40;
     }
 
-    // Validation Blueprint: UsernameClaimDoc (usernames/{usernameLower})
-    function isValidUsernameClaim(data, usernameLower) {
-      return usernameLower is string &&
+    match /users/{uid} {
+      allow get: if isSignedIn() && isValidId(uid);
+      allow list: if false;
+
+      allow create: if isOwner(uid) &&
+        isValidId(uid) &&
+        hasValidUserFieldTypesAndBounds(incoming()) &&
+        incoming().role == 'user' &&
+        incoming().xp <= 100000;
+
+      allow update: if isOwner(uid) &&
+        isValidId(uid) &&
+        hasValidUserFieldTypesAndBounds(incoming()) &&
+        incoming().role == existing().role &&
+        incoming().username == existing().username &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().xp >= existing().xp &&
+        (incoming().xp - existing().xp) <= 500 &&
+        incoming().level >= existing().level &&
+        incoming().longestStreak >= existing().longestStreak &&
+        incoming().totalMinutes >= existing().totalMinutes;
+
+      allow delete: if false;
+
+      match /private/{docId} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid) &&
+          isValidId(docId) &&
+          incoming().keys().hasAll(['tasks', 'settings', 'theme']) &&
+          incoming().keys().hasOnly(['tasks', 'settings', 'theme', 'dailyGoalHours']) &&
+          incoming().tasks is list && incoming().tasks.size() <= 200 &&
+          incoming().settings is map &&
+          incoming().theme in ['calm', 'cozy', 'deep-focus', 'fresh', 'energetic'] &&
+          (!('dailyGoalHours' in incoming()) ||
+            ((incoming().dailyGoalHours is int || incoming().dailyGoalHours is float) &&
+             incoming().dailyGoalHours >= 0 &&
+             incoming().dailyGoalHours <= 16));
+        allow delete: if isOwner(uid);
+      }
+
+      function isValidSessionDoc(data) {
+        return data.keys().hasAll(['minutes', 'subject', 'date', 'xpAwarded']) &&
+          data.keys().hasOnly(['minutes', 'subject', 'date', 'xpAwarded']) &&
+          data.minutes is int && data.minutes >= 1 && data.minutes <= 180 &&
+          data.subject is string && data.subject.size() >= 1 && data.subject.size() < 100 &&
+          data.date is string && data.date.size() == 10 &&
+          data.xpAwarded is int && data.xpAwarded >= 0 && data.xpAwarded <= 500;
+      }
+
+      match /sessions/{sessionId} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid) &&
+          isValidId(sessionId) &&
+          isValidSessionDoc(incoming());
+        allow delete: if isOwner(uid);
+      }
+    }
+
+    match /usernames/{usernameLower} {
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create: if isSignedIn() &&
         usernameLower.size() >= 3 &&
         usernameLower.size() <= 20 &&
         usernameLower.matches('^[a-z0-9_]+$') &&
-        data.keys().hasAll(['uid']) &&
-        data.keys().hasOnly(['uid']) &&
-        data.uid is string &&
-        data.uid == request.auth.uid;
+        !exists(/databases/$(database)/documents/usernames/$(usernameLower)) &&
+        incoming().keys().hasAll(['uid']) &&
+        incoming().keys().hasOnly(['uid']) &&
+        incoming().uid == request.auth.uid;
+      allow update, delete: if false;
     }
 
-    // Validation Blueprint: FriendRequestDoc (friendRequests/{id})
-    function isValidFriendRequest(data) {
-      return data.keys().hasAll(['fromUid', 'toUid', 'status', 'createdAt']) &&
-        data.keys().hasOnly([
-          'fromUid',
-          'toUid',
-          'fromUsername',
-          'fromDisplayName',
-          'toUsername',
-          'status',
-          'createdAt'
-        ]) &&
-        data.fromUid is string && data.fromUid.size() >= 1 && data.fromUid.size() <= 128 &&
-        data.toUid is string && data.toUid.size() >= 1 && data.toUid.size() <= 128 &&
-        data.fromUid != data.toUid &&
-        data.status in ['pending', 'accepted', 'declined'] &&
-        data.createdAt is string && data.createdAt.size() <= 40;
+    match /friendRequests/{requestId} {
+      allow get, list: if isSignedIn() &&
+        (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+        isValidId(requestId) &&
+        incoming().keys().hasAll(['fromUid', 'toUid', 'status', 'createdAt']) &&
+        incoming().keys().hasOnly(['fromUid', 'toUid', 'fromUsername', 'fromDisplayName', 'toUsername', 'status', 'createdAt']) &&
+        incoming().fromUid == request.auth.uid &&
+        incoming().toUid is string &&
+        incoming().toUid != request.auth.uid &&
+        requestId == (incoming().fromUid + '_' + incoming().toUid) &&
+        incoming().status == 'pending' &&
+        incoming().createdAt is string && incoming().createdAt.size() <= 40;
+
+      allow update: if isSignedIn() &&
+        existing().toUid == request.auth.uid &&
+        existing().status == 'pending' &&
+        incoming().fromUid == existing().fromUid &&
+        incoming().toUid == existing().toUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().status in ['accepted', 'declined'];
+
+      allow delete: if isSignedIn() &&
+        (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid);
     }
 
-    // Validation Blueprint: FriendshipDoc (friendships/{id})
-    function isValidFriendship(data) {
-      return data.keys().hasAll(['members', 'createdAt']) &&
-        data.keys().hasOnly(['members', 'createdAt']) &&
-        data.members is list &&
-        data.members.size() == 2 &&
-        data.members[0] is string && data.members[0].size() >= 1 && data.members[0].size() <= 128 &&
-        data.members[1] is string && data.members[1].size() >= 1 && data.members[1].size() <= 128 &&
-        data.members[0] != data.members[1] &&
-        data.createdAt is string && data.createdAt.size() <= 40;
+    function hasAcceptedRequestForRecipient(uidA, uidB) {
+      let reqAB = /databases/$(database)/documents/friendRequests/$(uidA + '_' + uidB);
+      let reqBA = /databases/$(database)/documents/friendRequests/$(uidB + '_' + uidA);
+      return (
+        existsAfter(reqAB) &&
+        getAfter(reqAB).data.fromUid == uidA &&
+        getAfter(reqAB).data.toUid == uidB &&
+        getAfter(reqAB).data.status == 'accepted' &&
+        request.auth.uid == uidB
+      ) || (
+        existsAfter(reqBA) &&
+        getAfter(reqBA).data.fromUid == uidB &&
+        getAfter(reqBA).data.toUid == uidA &&
+        getAfter(reqBA).data.status == 'accepted' &&
+        request.auth.uid == uidA
+      );
     }
 
-    // Validation Blueprint: StudyRoomDoc (rooms/{code})
+    match /friendships/{friendshipId} {
+      allow get, list: if isSignedIn() &&
+        request.auth.uid in resource.data.members;
+
+      allow create: if isSignedIn() &&
+        isValidId(friendshipId) &&
+        incoming().keys().hasAll(['members', 'createdAt']) &&
+        incoming().keys().hasOnly(['members', 'createdAt']) &&
+        incoming().members is list &&
+        incoming().members.size() == 2 &&
+        incoming().members[0] is string &&
+        incoming().members[1] is string &&
+        incoming().members[0] != incoming().members[1] &&
+        friendshipId == (incoming().members[0] + '_' + incoming().members[1]) &&
+        request.auth.uid in incoming().members &&
+        incoming().createdAt is string && incoming().createdAt.size() <= 40 &&
+        hasAcceptedRequestForRecipient(incoming().members[0], incoming().members[1]);
+
+      allow update: if false;
+
+      allow delete: if isSignedIn() &&
+        request.auth.uid in existing().members;
+    }
+
+    function hasValidRoomCustomDurations(data) {
+      return (!('focusMinutes' in data) || (data.focusMinutes is int && data.focusMinutes >= 1 && data.focusMinutes <= 180)) &&
+        (!('shortBreakMinutes' in data) || (data.shortBreakMinutes is int && data.shortBreakMinutes >= 1 && data.shortBreakMinutes <= 180)) &&
+        (!('longBreakMinutes' in data) || (data.longBreakMinutes is int && data.longBreakMinutes >= 1 && data.longBreakMinutes <= 180));
+    }
+
     function isValidRoom(data) {
-      return data.keys().hasAll([
-          'hostUid',
-          'memberUids',
-          'maxMembers',
-          'mode',
-          'startedAt',
-          'durationSec',
-          'status'
-        ]) &&
+      return data.keys().hasAll(['hostUid', 'memberUids', 'maxMembers', 'mode', 'startedAt', 'durationSec', 'status']) &&
         data.keys().hasOnly([
           'hostUid',
           'memberUids',
@@ -153,294 +247,97 @@ service cloud.firestore {
           'status',
           'createdAt'
         ]) &&
-        data.hostUid is string && data.hostUid.size() >= 1 && data.hostUid.size() <= 128 &&
-        data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 10 &&
-        data.memberUids[0] is string && data.memberUids[0].size() <= 128 &&
+        data.hostUid is string &&
+        data.memberUids is list &&
+        data.memberUids.size() >= 1 &&
+        data.memberUids.size() <= 10 &&
         data.hostUid in data.memberUids &&
         data.maxMembers == 10 &&
         data.mode in ['focus', 'shortBreak', 'longBreak'] &&
         (data.startedAt == null || (data.startedAt is int && data.startedAt >= 0)) &&
         data.durationSec is int && data.durationSec >= 10 && data.durationSec <= 10800 &&
-        (!('focusMinutes' in data) || (data.focusMinutes is int && data.focusMinutes >= 1 && data.focusMinutes <= 180)) &&
-        (!('shortBreakMinutes' in data) || (data.shortBreakMinutes is int && data.shortBreakMinutes >= 1 && data.shortBreakMinutes <= 180)) &&
-        (!('longBreakMinutes' in data) || (data.longBreakMinutes is int && data.longBreakMinutes >= 1 && data.longBreakMinutes <= 180)) &&
+        hasValidRoomCustomDurations(data) &&
         data.status in ['idle', 'running', 'paused', 'completed'];
     }
 
-    // Validation Blueprint: RoomMemberDoc (rooms/{code}/members/{memberUid})
-    function isValidRoomMember(data) {
-      return data.keys().hasAll(['name', 'photoURL', 'status', 'joinedAt']) &&
-        data.keys().hasOnly(['name', 'photoURL', 'status', 'joinedAt']) &&
-        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
-        data.photoURL is string && data.photoURL.size() <= 500 &&
-        data.status in ['focusing', 'break', 'idle'] &&
-        data.joinedAt is string && data.joinedAt.size() <= 40;
-    }
-
-    // Validation Blueprint: AudioTrackDoc (tracks/{trackId})
-    function isValidTrack(data) {
-      return data.keys().hasAll(['title', 'category', 'url', 'createdAt']) &&
-        data.keys().hasOnly(['title', 'category', 'url', 'createdAt']) &&
-        data.title is string && data.title.size() >= 1 && data.title.size() <= 100 &&
-        data.category is string && data.category.size() >= 1 && data.category.size() <= 50 &&
-        data.url is string && data.url.size() >= 5 && data.url.size() <= 500 &&
-        data.createdAt is string && data.createdAt.size() <= 40;
-    }
-
-    // Validation Blueprint: PrivateAppStateDoc (users/{uid}/private/{docId})
-    function isValidPrivateAppState(data) {
-      return data.keys().hasAll(['tasks', 'settings', 'theme']) &&
-        data.keys().hasOnly(['tasks', 'settings', 'theme', 'dailyGoalHours', 'updatedAt']) &&
-        data.tasks is list && data.tasks.size() <= 500 &&
-        data.settings is map &&
-        data.theme in ['calm', 'cozy', 'deep-focus', 'fresh', 'energetic'] &&
-        (!('dailyGoalHours' in data) || ((data.dailyGoalHours is int || data.dailyGoalHours is float) && data.dailyGoalHours >= 0 && data.dailyGoalHours <= 16));
-    }
-
-    // Validation Blueprint: CloudSessionDoc (users/{uid}/sessions/{sessionId})
-    function isValidSessionDoc(data) {
-      return data.keys().hasAll(['minutes', 'subject', 'date', 'xpAwarded']) &&
-        data.keys().hasOnly([
-          'minutes',
-          'subject',
-          'date',
-          'xpAwarded',
-          'taskId',
-          'taskTitle',
-          'timestamp',
-          'mode',
-          'completed'
-        ]) &&
-        data.minutes is int && data.minutes >= 1 && data.minutes <= 300 &&
-        data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 80 &&
-        data.date is string && data.date.size() == 10 &&
-        data.xpAwarded is int && data.xpAwarded >= 0 && data.xpAwarded <= 500;
-    }
-
-    // 1. /users/{uid}
-    // - First migration (create) allows starting xp up to 100000 with role == 'user'
-    // - Subsequent updates limit xp increase to <= 500 per write
-    // - Level and longestStreak must not drop
-    // - currentStreak and weeklyMinutes are non-negative integers under reasonable maximums
-    // - Email is never stored in users/{uid}
-    match /users/{uid} {
-      allow get: if isSignedIn() && isValidId(uid);
-      allow list: if isSignedIn();
-
-      allow create: if isOwner(uid) &&
-        isValidId(uid) &&
-        isValidUserProfile(incoming()) &&
-        incoming().role == 'user' &&
-        incoming().xp >= 0 &&
-        incoming().xp <= 100000;
-
-      allow update: if isOwner(uid) &&
-        isValidId(uid) &&
-        isValidUserProfile(incoming()) &&
-        incoming().role == existing().role &&
-        incoming().username == existing().username &&
-        incoming().createdAt == existing().createdAt &&
-        incoming().xp >= existing().xp &&
-        (incoming().xp - existing().xp) <= 500 &&
-        incoming().level >= existing().level &&
-        incoming().longestStreak >= existing().longestStreak &&
-        incoming().totalMinutes >= existing().totalMinutes;
-
-      allow delete: if false;
-
-      // 1a. /users/{uid}/private/{docId} (e.g., appState)
-      match /private/{docId} {
-        allow get, list: if isOwner(uid);
-        allow create, update: if isOwner(uid) &&
-          isValidId(docId) &&
-          isValidPrivateAppState(incoming());
-        allow delete: if isOwner(uid) && isValidId(docId);
-      }
-
-      // 1b. /users/{uid}/sessions/{sessionId}
-      match /sessions/{sessionId} {
-        allow get, list: if isOwner(uid);
-        allow create, update: if isOwner(uid) &&
-          isValidId(sessionId) &&
-          isValidSessionDoc(incoming());
-        allow delete: if isOwner(uid) && isValidId(sessionId);
-      }
-    }
-
-    // 2. /usernames/{usernameLower}
-    // Usernames are created once and cannot be overwritten or deleted.
-    match /usernames/{usernameLower} {
-      allow get: if isSignedIn();
-      allow list: if false;
-      allow create: if isSignedIn() &&
-        !exists(/databases/$(database)/documents/usernames/$(usernameLower)) &&
-        isValidUsernameClaim(incoming(), usernameLower);
-      allow update, delete: if false;
-    }
-
-    // 3. /friendRequests/{requestId}
-    // - Readable only by its two members (fromUid or toUid)
-    // - Deterministic ID: fromUid + '_' + toUid
-    // - Prevents sending a request to yourself (fromUid != toUid)
-    // - Prevents duplicate pending requests (neither A_B nor B_A may already exist as pending/accepted)
-    match /friendRequests/{requestId} {
-      allow get: if isSignedIn() &&
-        isValidId(requestId) &&
-        (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid);
-
-      allow list: if isSignedIn() &&
-        (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid);
-
-      allow create: if isSignedIn() &&
-        isValidId(requestId) &&
-        isValidFriendRequest(incoming()) &&
-        requestId == (incoming().fromUid + '_' + incoming().toUid) &&
-        incoming().fromUid == request.auth.uid &&
-        incoming().fromUid != incoming().toUid &&
-        incoming().status == 'pending' &&
-        !exists(/databases/$(database)/documents/friendRequests/$(requestId)) &&
-        !exists(/databases/$(database)/documents/friendRequests/$(incoming().toUid + '_' + incoming().fromUid));
-
-      allow update: if isSignedIn() &&
-        isValidId(requestId) &&
-        isValidFriendRequest(incoming()) &&
-        existing().toUid == request.auth.uid &&
-        existing().status == 'pending' &&
-        incoming().fromUid == existing().fromUid &&
-        incoming().toUid == existing().toUid &&
-        incoming().createdAt == existing().createdAt &&
-        incoming().status in ['accepted', 'declined'];
-
-      allow delete: if isSignedIn() &&
-        isValidId(requestId) &&
-        (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid);
-    }
-
-    // 4. /friendships/{friendshipId}
-    // - Readable and deletable only by its two members
-    // - May ONLY be created by the accepting recipient (toUid == request.auth.uid)
-    //   when an accepted friendRequest exists between the two members (either already committed or in the same batch via getAfter).
-    match /friendships/{friendshipId} {
-      function hasAcceptedRequestForRecipient(uidA, uidB) {
-        return (
-          existsAfter(/databases/$(database)/documents/friendRequests/$(uidA + '_' + uidB)) &&
-          getAfter(/databases/$(database)/documents/friendRequests/$(uidA + '_' + uidB)).data.fromUid == uidA &&
-          getAfter(/databases/$(database)/documents/friendRequests/$(uidA + '_' + uidB)).data.toUid == uidB &&
-          getAfter(/databases/$(database)/documents/friendRequests/$(uidA + '_' + uidB)).data.status == 'accepted' &&
-          request.auth.uid == uidB
-        ) || (
-          existsAfter(/databases/$(database)/documents/friendRequests/$(uidB + '_' + uidA)) &&
-          getAfter(/databases/$(database)/documents/friendRequests/$(uidB + '_' + uidA)).data.fromUid == uidB &&
-          getAfter(/databases/$(database)/documents/friendRequests/$(uidB + '_' + uidA)).data.toUid == uidA &&
-          getAfter(/databases/$(database)/documents/friendRequests/$(uidB + '_' + uidA)).data.status == 'accepted' &&
-          request.auth.uid == uidA
+    function isHostRoomUpdateValid() {
+      return existing().hostUid == request.auth.uid &&
+        (
+          existing().status != 'running' ||
+          (
+            incoming().get('focusMinutes', 25) == existing().get('focusMinutes', 25) &&
+            incoming().get('shortBreakMinutes', 5) == existing().get('shortBreakMinutes', 5) &&
+            incoming().get('longBreakMinutes', 15) == existing().get('longBreakMinutes', 15)
+          )
         );
-      }
-
-      allow get: if isSignedIn() &&
-        isValidId(friendshipId) &&
-        request.auth.uid in existing().members;
-
-      allow list: if isSignedIn() &&
-        request.auth.uid in existing().members;
-
-      allow create: if isSignedIn() &&
-        isValidId(friendshipId) &&
-        isValidFriendship(incoming()) &&
-        friendshipId == (incoming().members[0] + '_' + incoming().members[1]) &&
-        request.auth.uid in incoming().members &&
-        hasAcceptedRequestForRecipient(incoming().members[0], incoming().members[1]);
-
-      allow update: if false;
-
-      allow delete: if isSignedIn() &&
-        isValidId(friendshipId) &&
-        request.auth.uid in existing().members;
     }
 
-    // 5. /rooms/{code}
-    // - Only the host may change hostUid, startedAt, durationSec, mode, status, or remove other members.
-    // - A non-host may ONLY add or remove THEIR OWN uid in memberUids.
-    // - Joining is refused when existing().memberUids already has 10 members.
+    function isSelfJoinOnly() {
+      return !(request.auth.uid in existing().memberUids) &&
+        existing().memberUids.size() < 10 &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']) &&
+        incoming().memberUids.size() == existing().memberUids.size() + 1 &&
+        incoming().memberUids.hasAll(existing().memberUids) &&
+        (request.auth.uid in incoming().memberUids);
+    }
+
+    function isSelfLeaveOnly() {
+      return (request.auth.uid in existing().memberUids) &&
+        existing().hostUid != request.auth.uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']) &&
+        !(request.auth.uid in incoming().memberUids) &&
+        incoming().memberUids.size() == existing().memberUids.size() - 1 &&
+        existing().memberUids.hasAll(incoming().memberUids);
+    }
+
     match /rooms/{code} {
-      function isSelfJoinOnly() {
-        return !(request.auth.uid in existing().memberUids) &&
-          existing().memberUids.size() < 10 &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']) &&
-          incoming().memberUids.size() == existing().memberUids.size() + 1 &&
-          incoming().memberUids.hasAll(existing().memberUids) &&
-          request.auth.uid in incoming().memberUids;
-      }
-
-      function isSelfLeaveOnly() {
-        return (request.auth.uid in existing().memberUids) &&
-          existing().hostUid != request.auth.uid &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']) &&
-          !(request.auth.uid in incoming().memberUids) &&
-          incoming().memberUids.size() == existing().memberUids.size() - 1 &&
-          existing().memberUids.hasAll(incoming().memberUids);
-      }
-
-      allow get: if isSignedIn() &&
-        code.size() == 6 &&
-        (request.auth.uid in existing().memberUids || existing().memberUids.size() < 10);
-
-      allow list: if isSignedIn() &&
-        request.auth.uid in existing().memberUids;
+      allow get, list: if isSignedIn();
 
       allow create: if isSignedIn() &&
         code.size() == 6 &&
-        code.matches('^[A-Z0-9]{6}$') &&
         isValidRoom(incoming()) &&
         incoming().hostUid == request.auth.uid &&
-        incoming().memberUids.size() == 1 &&
-        incoming().memberUids[0] == request.auth.uid;
+        incoming().memberUids == [request.auth.uid];
 
       allow update: if isSignedIn() &&
         code.size() == 6 &&
         isValidRoom(incoming()) &&
         (
-          // Tier 1: Room Host can update timer fields (startedAt, durationSec, mode, status), hostUid, or memberUids
-          (existing().hostUid == request.auth.uid) ||
-          // Tier 2a: Non-host joining adds ONLY their own uid when room has < 10 members
+          isHostRoomUpdateValid() ||
           isSelfJoinOnly() ||
-          // Tier 2b: Non-host leaving removes ONLY their own uid
           isSelfLeaveOnly()
         );
 
-      allow delete: if isSignedIn() &&
-        code.size() == 6 &&
-        existing().hostUid == request.auth.uid;
+      allow delete: if isSignedIn() && existing().hostUid == request.auth.uid;
 
-      // 5a. /rooms/{code}/members/{memberUid}
-      // Readable and writable only by room members; only the member themselves or the room host can delete.
       match /members/{memberUid} {
-        function isParentRoomMember() {
-          return isSignedIn() &&
-            existsAfter(/databases/$(database)/documents/rooms/$(code)) &&
-            request.auth.uid in getAfter(/databases/$(database)/documents/rooms/$(code)).data.memberUids;
-        }
-
-        allow get, list: if isSignedIn() &&
-          exists(/databases/$(database)/documents/rooms/$(code)) &&
-          request.auth.uid in get(/databases/$(database)/documents/rooms/$(code)).data.memberUids;
-
-        allow create, update: if isOwner(memberUid) &&
-          isValidId(memberUid) &&
-          isValidRoomMember(incoming()) &&
-          isParentRoomMember();
-
-        allow delete: if isOwner(memberUid) ||
-          (isSignedIn() &&
-            exists(/databases/$(database)/documents/rooms/$(code)) &&
-            get(/databases/$(database)/documents/rooms/$(code)).data.hostUid == request.auth.uid);
+        allow get, list: if isSignedIn();
+        allow create, update: if isSignedIn() &&
+          request.auth.uid == memberUid &&
+          incoming().keys().hasAll(['name', 'photoURL', 'status', 'joinedAt']) &&
+          incoming().keys().hasOnly(['name', 'photoURL', 'status', 'joinedAt']) &&
+          incoming().name is string && incoming().name.size() >= 1 && incoming().name.size() <= 80 &&
+          incoming().photoURL is string && incoming().photoURL.size() <= 500 &&
+          incoming().status in ['focusing', 'break', 'idle'] &&
+          incoming().joinedAt is string && incoming().joinedAt.size() <= 40;
+        allow delete: if isSignedIn() &&
+          (request.auth.uid == memberUid ||
+           get(/databases/$(database)/documents/rooms/$(code)).data.hostUid == request.auth.uid);
       }
     }
 
-    // 6. /tracks/{trackId}
-    // Everyone signed in can read tracks; only admins can write tracks.
+    function isValidTrack(data) {
+      return data.keys().hasAll(['title', 'category', 'url', 'createdAt']) &&
+        data.keys().hasOnly(['title', 'category', 'url', 'createdAt']) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() < 100 &&
+        data.category in ['Lo-Fi', 'Nature', 'Classical', 'Ambient', 'White Noise', 'Instrumental'] &&
+        data.url is string && data.url.size() >= 10 && data.url.size() <= 500 &&
+        data.url.matches('^https://.*') &&
+        data.createdAt is string && data.createdAt.size() <= 40;
+    }
+
     match /tracks/{trackId} {
-      allow get, list: if isSignedIn();
+      allow get, list: if true;
       allow create, update: if isAdmin() &&
         isValidId(trackId) &&
         isValidTrack(incoming());

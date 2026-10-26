@@ -726,4 +726,94 @@ export function formatDailyGoalLabel(dailyGoalHours: number): string {
   return `${hours}h ${minutes}m`;
 }
 
+export const ALLOWED_TRACK_CATEGORIES = [
+  'Lo-Fi',
+  'Nature',
+  'Classical',
+  'Ambient',
+  'White Noise',
+  'Instrumental',
+] as const;
+
+export type AllowedTrackCategory = (typeof ALLOWED_TRACK_CATEGORIES)[number];
+
+/**
+ * Sanitizes user-entered text (names, usernames, task titles, subjects, notes, room codes, track titles)
+ * so that no HTML tags, script payloads, angle brackets, or control characters can ever be injected.
+ */
+export function sanitizePlainText(
+  rawInput: unknown,
+  maxLength: number = 120
+): string {
+  if (typeof rawInput !== 'string') return '';
+  const withoutScripts = rawInput
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<\/?[a-z][^>]*>/gi, '')
+    .replace(/[<>]/g, '')
+    .replace(/javascript\s*:/gi, '')
+    .replace(/vbscript\s*:/gi, '')
+    .replace(/data\s*:\s*text\/html/gi, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+
+  return withoutScripts.trim().slice(0, Math.max(1, maxLength));
+}
+
+/**
+ * Validates that an audio URL is a safe, well-formed HTTPS URL before saving or playing it.
+ */
+export function isValidHttpsAudioUrl(rawUrl: unknown): boolean {
+  if (typeof rawUrl !== 'string') return false;
+  const trimmed = rawUrl.trim();
+  if (trimmed.length < 10 || trimmed.length > 500) return false;
+  if (!trimmed.startsWith('https://')) return false;
+  if (/[<>"'\s\u0000-\u001F\u007F]/.test(trimmed)) return false;
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:') return false;
+    if (!parsed.hostname || !parsed.hostname.includes('.')) return false;
+    if (parsed.username || parsed.password) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sliding-window per-user rate limiter (default: 20 requests per 60,000 ms).
+ */
+export function evaluatePerUserRateLimit(
+  buckets: Map<string, number[]>,
+  userKey: string,
+  nowMs: number,
+  windowMs: number = 60_000,
+  maxRequests: number = 20
+): { allowed: boolean; remaining: number; retryAfterSec: number } {
+  const cutoff = nowMs - windowMs;
+  const existing = buckets.get(userKey) || [];
+  const activeTimestamps = existing.filter((t) => t > cutoff);
+
+  if (activeTimestamps.length >= maxRequests) {
+    buckets.set(userKey, activeTimestamps);
+    const oldest = activeTimestamps[0] ?? nowMs;
+    const retryAfterSec = Math.max(
+      1,
+      Math.ceil((oldest + windowMs - nowMs) / 1000)
+    );
+    return {
+      allowed: false,
+      remaining: 0,
+      retryAfterSec,
+    };
+  }
+
+  activeTimestamps.push(nowMs);
+  buckets.set(userKey, activeTimestamps);
+  return {
+    allowed: true,
+    remaining: Math.max(0, maxRequests - activeTimestamps.length),
+    retryAfterSec: 0,
+  };
+}
+
 

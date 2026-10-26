@@ -8,6 +8,12 @@ import {
   X,
 } from 'lucide-react';
 import { CloudAudioTrack, MoodThemeConfig } from '../types';
+import {
+  ALLOWED_TRACK_CATEGORIES,
+  AllowedTrackCategory,
+  isValidHttpsAudioUrl,
+  sanitizePlainText,
+} from '../utils/focusLogic';
 
 interface AdminTracksViewProps {
   tracks: CloudAudioTrack[];
@@ -31,7 +37,7 @@ export function AdminTracksView({
 }: AdminTracksViewProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('Lo-Fi');
+  const [category, setCategory] = useState<AllowedTrackCategory>('Lo-Fi');
   const [url, setUrl] = useState('');
   const [createdAtHold, setCreatedAtHold] = useState<string | undefined>(
     undefined
@@ -50,7 +56,12 @@ export function AdminTracksView({
   const handleStartEdit = (track: CloudAudioTrack) => {
     setEditingId(track.id);
     setTitle(track.title);
-    setCategory(track.category);
+    const validCat = ALLOWED_TRACK_CATEGORIES.includes(
+      track.category as AllowedTrackCategory
+    )
+      ? (track.category as AllowedTrackCategory)
+      : 'Ambient';
+    setCategory(validCat);
     setUrl(track.url);
     setCreatedAtHold(track.createdAt);
     setStatusMessage(null);
@@ -58,21 +69,35 @@ export function AdminTracksView({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !category.trim() || !url.trim()) return;
+    const safeTitle = sanitizePlainText(title, 99);
+    const trimmedUrl = url.trim();
+    if (!safeTitle) {
+      setStatusMessage('Please enter a valid track title (under 100 characters).');
+      return;
+    }
+    if (!ALLOWED_TRACK_CATEGORIES.includes(category)) {
+      setStatusMessage('Please select a valid track category.');
+      return;
+    }
+    if (!isValidHttpsAudioUrl(trimmedUrl)) {
+      setStatusMessage('Audio URL must start with https:// and be a valid URL.');
+      return;
+    }
+
     setIsSaving(true);
     setStatusMessage(null);
     try {
       await onSaveTrack({
         id: editingId || undefined,
-        title: title.trim(),
-        category: category.trim(),
-        url: url.trim(),
+        title: safeTitle,
+        category,
+        url: trimmedUrl,
         createdAt: createdAtHold,
       });
       setStatusMessage(
         editingId
-          ? `Updated track "${title.trim()}".`
-          : `Added track "${title.trim()}" to the Focus music player.`
+          ? `Updated track "${safeTitle}".`
+          : `Added track "${safeTitle}" to the Focus music player.`
       );
       resetForm();
     } catch (err) {
@@ -146,7 +171,7 @@ export function AdminTracksView({
               <input
                 id="admin-track-title"
                 type="text"
-                maxLength={100}
+                maxLength={99}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g. Kyoto Rainy Cafe Lo-Fi"
@@ -162,16 +187,25 @@ export function AdminTracksView({
               >
                 Category
               </label>
-              <input
+              <select
                 id="admin-track-category"
-                type="text"
-                maxLength={50}
                 value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                placeholder="e.g. Lo-Fi, Nature, Classical, Ambient"
+                onChange={(e) =>
+                  setCategory(e.target.value as AllowedTrackCategory)
+                }
                 className={`w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm outline-none ${themeConfig.glassInputClass}`}
                 required
-              />
+              >
+                {ALLOWED_TRACK_CATEGORIES.map((cat) => (
+                  <option
+                    key={cat}
+                    value={cat}
+                    className="bg-slate-900 text-white"
+                  >
+                    {cat}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -179,7 +213,7 @@ export function AdminTracksView({
                 htmlFor="admin-track-url"
                 className={`block text-xs font-semibold mb-1.5 ${themeConfig.textPrimaryClass}`}
               >
-                Direct Audio URL (.mp3, .ogg, .wav)
+                Direct Audio URL (https:// .mp3, .ogg, .wav)
               </label>
               <input
                 id="admin-track-url"

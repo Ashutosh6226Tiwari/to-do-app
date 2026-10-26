@@ -29,7 +29,12 @@ import {
   suggestMoodThemeWithGemini,
 } from '../utils/geminiClient';
 import { MOOD_THEMES } from '../utils/themes';
-import { formatTimeMMSS, getModeDurationMs } from '../utils/focusLogic';
+import {
+  formatTimeMMSS,
+  getModeDurationMs,
+  isValidHttpsAudioUrl,
+  sanitizePlainText,
+} from '../utils/focusLogic';
 
 interface FocusViewProps {
   tasks: StudyTask[];
@@ -125,6 +130,9 @@ export function FocusView({
   };
 
   const handleToggleCustomTrack = (track: CloudAudioTrack) => {
+    if (!isValidHttpsAudioUrl(track.url)) {
+      return;
+    }
     if (activeAmbient) {
       soundEngine.stopAmbient();
       setActiveAmbient(null);
@@ -136,7 +144,7 @@ export function FocusView({
       if (customAudioRef.current) {
         customAudioRef.current.pause();
       }
-      const audio = new Audio(track.url);
+      const audio = new Audio(track.url.trim());
       audio.loop = true;
       audio.volume = ambientVolume;
       customAudioRef.current = audio;
@@ -144,6 +152,7 @@ export function FocusView({
       setActiveCustomTrackId(track.id);
     }
   };
+  void sanitizePlainText;
 
   const handleVolumeChange = (nextVol: number) => {
     setAmbientVolume(nextVol);

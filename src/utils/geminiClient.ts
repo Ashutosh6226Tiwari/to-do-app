@@ -1,4 +1,21 @@
 import { MoodThemeId } from '../types';
+import { auth } from './firebase';
+import { sanitizePlainText } from './focusLogic';
+
+async function getAuthenticatedGeminiHeaders(): Promise<Record<string, string> | null> {
+  const user = auth.currentUser;
+  if (!user) return null;
+  try {
+    const idToken = await user.getIdToken();
+    if (!idToken) return null;
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export interface GeneratedPlanTask {
   title: string;
@@ -47,11 +64,16 @@ export async function generateStudyPlanWithGemini(
   startDate: string,
   useSearch: boolean
 ): Promise<StudyPlanResponse> {
+  const cleanGoal = sanitizePlainText(goal, 200);
   try {
+    const headers = await getAuthenticatedGeminiHeaders();
+    if (!headers) {
+      throw new Error('Not signed in with Firebase Auth');
+    }
     const res = await fetch('/api/gemini/study-plan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goal, startDate, useSearch }),
+      headers,
+      body: JSON.stringify({ goal: cleanGoal, startDate, useSearch }),
     });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
@@ -62,7 +84,6 @@ export async function generateStudyPlanWithGemini(
     }
     throw new Error('Empty task list returned');
   } catch {
-    const cleanGoal = goal.trim();
     const subjectGuess =
       /physics/i.test(cleanGoal)
         ? 'Physics'
@@ -142,11 +163,21 @@ export async function breakDownTaskWithGemini(
   subject: string,
   estimatedPomodoros: number
 ): Promise<TaskBreakdownResponse> {
+  const safeTitle = sanitizePlainText(title, 120);
+  const safeSubject = sanitizePlainText(subject, 80);
   try {
+    const headers = await getAuthenticatedGeminiHeaders();
+    if (!headers) {
+      throw new Error('Not signed in with Firebase Auth');
+    }
     const res = await fetch('/api/gemini/task-breakdown', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, subject, estimatedPomodoros }),
+      headers,
+      body: JSON.stringify({
+        title: safeTitle,
+        subject: safeSubject,
+        estimatedPomodoros,
+      }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -159,15 +190,15 @@ export async function breakDownTaskWithGemini(
       usedFallback: true,
       subtasks: [
         {
-          title: `Review core definitions & notes for ${title}`,
+          title: `Review core definitions & notes for ${safeTitle}`,
           estimatedPomodoros: 1,
         },
         {
-          title: `Complete primary exercises / draft section for ${title}`,
+          title: `Complete primary exercises / draft section for ${safeTitle}`,
           estimatedPomodoros: Math.max(1, Math.floor(estimatedPomodoros / 2)),
         },
         {
-          title: `Self-test and verify solutions for ${title}`,
+          title: `Self-test and verify solutions for ${safeTitle}`,
           estimatedPomodoros: 1,
         },
       ],
@@ -178,11 +209,16 @@ export async function breakDownTaskWithGemini(
 export async function suggestMoodThemeWithGemini(
   feeling: string
 ): Promise<MoodSuggestionResponse> {
+  const safeFeeling = sanitizePlainText(feeling, 160);
   try {
+    const headers = await getAuthenticatedGeminiHeaders();
+    if (!headers) {
+      throw new Error('Not signed in with Firebase Auth');
+    }
     const res = await fetch('/api/gemini/mood-suggestion', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feeling }),
+      headers,
+      body: JSON.stringify({ feeling: safeFeeling }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -198,7 +234,7 @@ export async function suggestMoodThemeWithGemini(
     }
     throw new Error('Invalid theme');
   } catch {
-    const f = feeling.toLowerCase();
+    const f = safeFeeling.toLowerCase();
     if (/stress|anxi|overwhelm|nervous|panic/.test(f)) {
       return {
         theme: 'calm',
@@ -254,11 +290,16 @@ export async function generateWeeklyInsightWithGemini(
   stats: Record<string, unknown>,
   studentName: string
 ): Promise<WeeklyInsightResponse> {
+  const safeStudentName = sanitizePlainText(studentName, 60) || 'Student';
   try {
+    const headers = await getAuthenticatedGeminiHeaders();
+    if (!headers) {
+      throw new Error('Not signed in with Firebase Auth');
+    }
     const res = await fetch('/api/gemini/weekly-insight', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stats, studentName }),
+      headers,
+      body: JSON.stringify({ stats, studentName: safeStudentName }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -268,7 +309,7 @@ export async function generateWeeklyInsightWithGemini(
     throw new Error('Incomplete insight');
   } catch {
     return {
-      headline: `Consistent Momentum, ${studentName}!`,
+      headline: `Consistent Momentum, ${safeStudentName}!`,
       summary: `You have logged ${stats.hoursThisWeek ?? 3.8} hours of deep focus this week and maintained a ${stats.currentStreak ?? 4}-day study streak. Your strongest concentration blocks are in Physics and Computer Science.`,
       tips: [
         'Keep your streak alive by starting with a single 25-minute Pomodoro on your highest-priority task before checking messages.',
@@ -283,11 +324,16 @@ export async function generateWeeklyInsightWithGemini(
 export async function searchGroundedStudyQuery(
   query: string
 ): Promise<SearchGroundingResponse> {
+  const safeQuery = sanitizePlainText(query, 200);
   try {
+    const headers = await getAuthenticatedGeminiHeaders();
+    if (!headers) {
+      throw new Error('Not signed in with Firebase Auth');
+    }
     const res = await fetch('/api/gemini/search-grounding', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
+      headers,
+      body: JSON.stringify({ query: safeQuery }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -297,7 +343,7 @@ export async function searchGroundedStudyQuery(
     };
   } catch {
     return {
-      answer: `Key study reference for "${query}": Focus on foundational definitions, worked canonical examples, and past exam synthesis questions. Verify formulas against your course syllabus and test comprehension using active recall.`,
+      answer: `Key study reference for "${safeQuery}": Focus on foundational definitions, worked canonical examples, and past exam synthesis questions. Verify formulas against your course syllabus and test comprehension using active recall.`,
       sources: [
         {
           title: 'Khan Academy — College & AP Course Reference',
