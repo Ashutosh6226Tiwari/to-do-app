@@ -451,7 +451,7 @@ test('5. Username overwrite or deletion is refused once created', () => {
   );
 });
 
-test('6. firestore.rules file contains all required structural guards', () => {
+test('6. firestore.rules file contains all required structural guards including room duration presets/custom bounds, dailyGoalHours, and admin-only tracks writes', () => {
   assert.ok(rulesSource.includes('incoming().xp <= 100000'));
   assert.ok(rulesSource.includes('(incoming().xp - existing().xp) <= 500'));
   assert.ok(rulesSource.includes('incoming().level >= existing().level'));
@@ -459,4 +459,13 @@ test('6. firestore.rules file contains all required structural guards', () => {
   assert.ok(rulesSource.includes('isSelfJoinOnly()'));
   assert.ok(rulesSource.includes('isSelfLeaveOnly()'));
   assert.ok(rulesSource.includes('hasAcceptedRequestForRecipient'));
+  assert.ok(rulesSource.includes('focusMinutes'));
+  assert.ok(rulesSource.includes('shortBreakMinutes'));
+  assert.ok(rulesSource.includes('longBreakMinutes'));
+  assert.ok(rulesSource.includes('dailyGoalHours'));
+  assert.ok(rulesSource.includes('match /tracks/{trackId}'));
+  assert.ok(rulesSource.includes('allow create, update: if isAdmin() &&'));
+  assert.ok(rulesSource.includes('allow delete: if isAdmin() && isValidId(trackId);'));
 });
+
+

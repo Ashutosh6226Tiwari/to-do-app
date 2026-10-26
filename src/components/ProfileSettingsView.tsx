@@ -3,11 +3,12 @@ import {
   Bell,
   Check,
   Cloud,
+  KeyRound,
   LogIn,
   LogOut,
   Palette,
+  Pencil,
   RotateCcw,
-  ShieldCheck,
   Sliders,
   Trophy,
   User,
@@ -19,6 +20,7 @@ import {
   UserProfile,
 } from '../types';
 import {
+  formatDailyGoalLabel,
   getLevelInfo,
   getXpRequiredForLevelUp,
   LevelProgressInfo,
@@ -30,14 +32,16 @@ interface ProfileSettingsViewProps {
   profile: UserProfile;
   levelInfo: LevelProgressInfo;
   currentStreak: number;
+  hoursToday: number;
   themeConfig: MoodThemeConfig;
   onUpdateProfile: (next: UserProfile) => void;
+  onOpenDailyGoalModal: () => void;
   onResetDemoData: () => void;
   cloudUser?: CloudUserDoc;
   isCloudConnected?: boolean;
   onGoogleSignIn?: () => void;
+  onOpenSignInScreen?: () => void;
   onSignOut?: () => void;
-  onToggleLocalAdminRole?: () => void;
 }
 
 const ALL_LEVEL_TIERS = [
@@ -52,18 +56,19 @@ export function ProfileSettingsView({
   profile,
   levelInfo,
   currentStreak,
+  hoursToday,
   themeConfig,
   onUpdateProfile,
+  onOpenDailyGoalModal,
   onResetDemoData,
   cloudUser,
   isCloudConnected = false,
   onGoogleSignIn,
+  onOpenSignInScreen,
   onSignOut,
-  onToggleLocalAdminRole,
 }: ProfileSettingsViewProps) {
   const [nameInput, setNameInput] = useState(profile.name);
   const [majorInput, setMajorInput] = useState(profile.majorOrGrade);
-  const [goalHoursInput, setGoalHoursInput] = useState(profile.dailyGoalHours);
   const [savedNotice, setSavedNotice] = useState(false);
 
   const handleSaveProfile = (e: React.FormEvent) => {
@@ -72,7 +77,6 @@ export function ProfileSettingsView({
       ...profile,
       name: nameInput.trim() || 'Student',
       majorOrGrade: majorInput.trim() || 'College Student',
-      dailyGoalHours: Math.max(0.5, Number(goalHoursInput) || 2),
     });
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 2500);
@@ -88,6 +92,11 @@ export function ProfileSettingsView({
   // Suppress unused import lint
   void getLevelInfo;
   void getXpRequiredForLevelUp;
+
+  const goalProgressPercent =
+    profile.dailyGoalHours > 0
+      ? Math.min(100, Math.round((hoursToday / profile.dailyGoalHours) * 100))
+      : 100;
 
   return (
     <div className="space-y-6">
@@ -140,23 +149,43 @@ export function ProfileSettingsView({
               />
             </div>
 
-            <div>
-              <label
-                htmlFor="profile-goal-input"
-                className={`block text-xs font-semibold mb-1 ${themeConfig.textSecondaryClass}`}
-              >
-                Daily Study Goal (Hours)
-              </label>
-              <input
-                id="profile-goal-input"
-                type="number"
-                step="0.5"
-                min="0.5"
-                max="14"
-                value={goalHoursInput}
-                onChange={(e) => setGoalHoursInput(Number(e.target.value))}
-                className={`w-full px-3.5 py-2 rounded-xl text-sm font-mono tabular-nums outline-none ${themeConfig.glassInputClass}`}
-              />
+            {/* Daily Study Goal Card inside Profile & Settings with Edit button */}
+            <div
+              className={`p-3.5 rounded-xl border ${themeConfig.borderClass} bg-black/5 dark:bg-white/5`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span
+                    className={`block text-xs font-semibold ${themeConfig.textPrimaryClass}`}
+                  >
+                    Daily Goal
+                  </span>
+                  <span
+                    data-testid="settings-daily-goal-text"
+                    className={`text-xs font-mono tabular-nums ${themeConfig.textSecondaryClass}`}
+                  >
+                    {hoursToday}h / {formatDailyGoalLabel(profile.dailyGoalHours)}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onOpenDailyGoalModal}
+                  aria-label="Set daily goal from settings"
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>Set daily goal</span>
+                </button>
+              </div>
+              <div className="w-full h-2 rounded-full bg-black/10 dark:bg-white/15 overflow-hidden mt-2.5">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{
+                    width: `${goalProgressPercent}%`,
+                    backgroundColor: themeConfig.accentHex,
+                  }}
+                />
+              </div>
             </div>
 
             <div className="flex items-center justify-between pt-2">
@@ -519,18 +548,14 @@ export function ProfileSettingsView({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            {!isCloudConnected && onToggleLocalAdminRole && (
+            {!isCloudConnected && onOpenSignInScreen && (
               <button
                 type="button"
-                onClick={onToggleLocalAdminRole}
+                onClick={onOpenSignInScreen}
                 className={`px-3.5 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
               >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>
-                  {cloudUser.role === 'admin'
-                    ? 'Switch to User Role (Preview)'
-                    : 'Preview Admin Panel Role'}
-                </span>
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Admin Login</span>
               </button>
             )}
 

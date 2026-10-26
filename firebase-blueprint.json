@@ -185,7 +185,19 @@
         },
         "durationSec": {
           "type": "integer",
-          "description": "Duration of current session in seconds"
+          "description": "Duration of current session in seconds (60 to 10800)"
+        },
+        "focusMinutes": {
+          "type": "integer",
+          "description": "Configured room focus duration in minutes (1 to 180)"
+        },
+        "shortBreakMinutes": {
+          "type": "integer",
+          "description": "Configured room short break duration in minutes (1 to 180)"
+        },
+        "longBreakMinutes": {
+          "type": "integer",
+          "description": "Configured room long break duration in minutes (1 to 180)"
         },
         "status": {
           "type": "string",
@@ -260,7 +272,7 @@
     },
     "PrivateAppStateDoc": {
       "title": "PrivateAppStateDoc",
-      "description": "User private planner tasks, timer settings, and mood theme at users/{uid}/private/appState",
+      "description": "User private planner tasks, timer settings, daily goal, and mood theme at users/{uid}/private/appState",
       "type": "object",
       "properties": {
         "tasks": {
@@ -275,6 +287,10 @@
           "type": "string",
           "enum": ["calm", "cozy", "deep-focus", "fresh", "energetic"],
           "description": "Selected mood theme"
+        },
+        "dailyGoalHours": {
+          "type": "number",
+          "description": "Daily study goal in hours (0 to 16)"
         }
       },
       "required": ["tasks", "settings", "theme"]

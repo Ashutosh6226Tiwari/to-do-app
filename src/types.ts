@@ -59,6 +59,9 @@ export interface StudyRoomDoc {
   mode: TimerMode;
   startedAt: number | null;
   durationSec: number;
+  focusMinutes?: number;
+  shortBreakMinutes?: number;
+  longBreakMinutes?: number;
   status: 'idle' | 'running' | 'paused' | 'completed';
   createdAt?: string;
 }

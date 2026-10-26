@@ -147,6 +147,9 @@ service cloud.firestore {
           'mode',
           'startedAt',
           'durationSec',
+          'focusMinutes',
+          'shortBreakMinutes',
+          'longBreakMinutes',
           'status',
           'createdAt'
         ]) &&
@@ -158,6 +161,9 @@ service cloud.firestore {
         data.mode in ['focus', 'shortBreak', 'longBreak'] &&
         (data.startedAt == null || (data.startedAt is int && data.startedAt >= 0)) &&
         data.durationSec is int && data.durationSec >= 10 && data.durationSec <= 10800 &&
+        (!('focusMinutes' in data) || (data.focusMinutes is int && data.focusMinutes >= 1 && data.focusMinutes <= 180)) &&
+        (!('shortBreakMinutes' in data) || (data.shortBreakMinutes is int && data.shortBreakMinutes >= 1 && data.shortBreakMinutes <= 180)) &&
+        (!('longBreakMinutes' in data) || (data.longBreakMinutes is int && data.longBreakMinutes >= 1 && data.longBreakMinutes <= 180)) &&
         data.status in ['idle', 'running', 'paused', 'completed'];
     }
 
@@ -184,10 +190,11 @@ service cloud.firestore {
     // Validation Blueprint: PrivateAppStateDoc (users/{uid}/private/{docId})
     function isValidPrivateAppState(data) {
       return data.keys().hasAll(['tasks', 'settings', 'theme']) &&
-        data.keys().hasOnly(['tasks', 'settings', 'theme', 'updatedAt']) &&
+        data.keys().hasOnly(['tasks', 'settings', 'theme', 'dailyGoalHours', 'updatedAt']) &&
         data.tasks is list && data.tasks.size() <= 500 &&
         data.settings is map &&
-        data.theme in ['calm', 'cozy', 'deep-focus', 'fresh', 'energetic'];
+        data.theme in ['calm', 'cozy', 'deep-focus', 'fresh', 'energetic'] &&
+        (!('dailyGoalHours' in data) || ((data.dailyGoalHours is int || data.dailyGoalHours is float) && data.dailyGoalHours >= 0 && data.dailyGoalHours <= 16));
     }
 
     // Validation Blueprint: CloudSessionDoc (users/{uid}/sessions/{sessionId})

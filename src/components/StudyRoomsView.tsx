@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   CheckCircle2,
+  Clock,
   Copy,
   Crown,
   DoorOpen,
@@ -10,6 +11,7 @@ import {
   PlusCircle,
   Radio,
   RotateCcw,
+  Sliders,
   Users,
 } from 'lucide-react';
 import {
@@ -20,6 +22,7 @@ import {
   TimerMode,
 } from '../types';
 import {
+  clampRoomCustomMinutes,
   computeSharedRoomRemainingSeconds,
   formatTimeMMSS,
 } from '../utils/focusLogic';
@@ -29,13 +32,23 @@ interface StudyRoomsViewProps {
   activeRoom: StudyRoomDoc | null;
   roomMembers: RoomMemberItem[];
   themeConfig: MoodThemeConfig;
-  onCreateRoom: (durationMinutes: number) => Promise<void>;
+  onCreateRoom: (
+    durationMinutes: number,
+    roomDurations?: {
+      focusMinutes: number;
+      shortBreakMinutes: number;
+      longBreakMinutes: number;
+    }
+  ) => Promise<void>;
   onJoinRoom: (code: string) => Promise<void>;
   onLeaveRoom: () => Promise<void>;
   onHostUpdateTimer: (patch: {
     mode?: TimerMode;
     startedAt?: number | null;
     durationSec?: number;
+    focusMinutes?: number;
+    shortBreakMinutes?: number;
+    longBreakMinutes?: number;
     status?: 'idle' | 'running' | 'paused' | 'completed';
   }) => Promise<void>;
   onUpdateMyMemberStatus: (status: 'focusing' | 'break' | 'idle') => Promise<void>;
@@ -53,6 +66,11 @@ const ROOM_MODE_LABELS: Record<TimerMode, string> = {
   longBreak: 'Long Break',
 };
 
+const ROOM_DURATION_PRESETS = [
+  { label: '25 / 5 / 15', focus: 25, shortBreak: 5, longBreak: 15 },
+  { label: '50 / 10 / 30', focus: 50, shortBreak: 10, longBreak: 30 },
+] as const;
+
 export function StudyRoomsView({
   currentUser,
   activeRoom,
@@ -66,10 +84,43 @@ export function StudyRoomsView({
   onCompleteRoomSessionAwardXp,
 }: StudyRoomsViewProps) {
   const [joinCodeInput, setJoinCodeInput] = useState('');
-  const [customDurationMins, setCustomDurationMins] = useState(25);
+  const [createFocusMins, setCreateFocusMins] = useState(25);
+  const [createShortBreakMins, setCreateShortBreakMins] = useState(5);
+  const [createLongBreakMins, setCreateLongBreakMins] = useState(15);
   const [roomError, setRoomError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  // Host adjustable timer state synced with activeRoom
+  const roomFocusMins = clampRoomCustomMinutes(
+    activeRoom?.focusMinutes ??
+      (activeRoom?.mode === 'focus'
+        ? Math.round((activeRoom?.durationSec || 1500) / 60)
+        : 25)
+  );
+  const roomShortBreakMins = clampRoomCustomMinutes(
+    activeRoom?.shortBreakMinutes ??
+      (activeRoom?.mode === 'shortBreak'
+        ? Math.round((activeRoom?.durationSec || 300) / 60)
+        : 5)
+  );
+  const roomLongBreakMins = clampRoomCustomMinutes(
+    activeRoom?.longBreakMinutes ??
+      (activeRoom?.mode === 'longBreak'
+        ? Math.round((activeRoom?.durationSec || 900) / 60)
+        : 15)
+  );
+
+  const [hostFocusInput, setHostFocusInput] = useState<number>(roomFocusMins);
+  const [hostShortInput, setHostShortInput] =
+    useState<number>(roomShortBreakMins);
+  const [hostLongInput, setHostLongInput] = useState<number>(roomLongBreakMins);
+
+  useEffect(() => {
+    setHostFocusInput(roomFocusMins);
+    setHostShortInput(roomShortBreakMins);
+    setHostLongInput(roomLongBreakMins);
+  }, [roomFocusMins, roomShortBreakMins, roomLongBreakMins]);
 
   const [remainingSeconds, setRemainingSeconds] = useState<number>(() =>
     activeRoom
@@ -123,7 +174,14 @@ export function StudyRoomsView({
     setRoomError(null);
     setIsBusy(true);
     try {
-      await onCreateRoom(customDurationMins);
+      const focusMinutes = clampRoomCustomMinutes(createFocusMins);
+      const shortBreakMinutes = clampRoomCustomMinutes(createShortBreakMins);
+      const longBreakMinutes = clampRoomCustomMinutes(createLongBreakMins);
+      await onCreateRoom(focusMinutes, {
+        focusMinutes,
+        shortBreakMinutes,
+        longBreakMinutes,
+      });
     } catch (err) {
       setRoomError(
         err instanceof Error ? err.message : 'Could not create room.'
@@ -193,7 +251,9 @@ export function StudyRoomsView({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Create Room Card */}
-          <div className={`p-6 rounded-2xl ${themeConfig.glassCardClass} flex flex-col justify-between`}>
+          <div
+            className={`p-6 rounded-2xl ${themeConfig.glassCardClass} flex flex-col justify-between`}
+          >
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <PlusCircle
@@ -208,30 +268,111 @@ export function StudyRoomsView({
                 </h2>
               </div>
               <p className={`text-xs mb-4 ${themeConfig.textSecondaryClass}`}>
-                Become the room host, generate an instant 6-character invite code,
-                and control the shared Pomodoro timer for up to 10 students.
+                Set your room&apos;s Focus, Short Break, and Long Break durations
+                (presets 25/5/15, 50/10/30, or custom 1–180 minutes) and generate
+                an instant 6-character code.
               </p>
 
-              <div className="mb-4">
-                <label
-                  htmlFor="create-room-duration"
-                  className={`block text-xs font-semibold mb-1.5 ${themeConfig.textPrimaryClass}`}
+              {/* Presets before creating room */}
+              <div className="mb-3">
+                <span
+                  className={`block text-xs font-semibold mb-1.5 ${themeConfig.textSecondaryClass}`}
                 >
-                  Default Focus Duration (minutes)
-                </label>
-                <input
-                  id="create-room-duration"
-                  type="number"
-                  min={5}
-                  max={90}
-                  value={customDurationMins}
-                  onChange={(e) =>
-                    setCustomDurationMins(
-                      Math.max(5, Math.min(90, Number(e.target.value) || 25))
-                    )
-                  }
-                  className={`w-32 px-3 py-2 rounded-xl text-sm font-mono outline-none ${themeConfig.glassInputClass}`}
-                />
+                  Timer Presets (Focus / Short / Long)
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {ROOM_DURATION_PRESETS.map((preset) => {
+                    const isSelected =
+                      createFocusMins === preset.focus &&
+                      createShortBreakMins === preset.shortBreak &&
+                      createLongBreakMins === preset.longBreak;
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => {
+                          setCreateFocusMins(preset.focus);
+                          setCreateShortBreakMins(preset.shortBreak);
+                          setCreateLongBreakMins(preset.longBreak);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-mono font-semibold border transition-all ${
+                          isSelected
+                            ? themeConfig.activeTabClass
+                            : `${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom 1-180 min inputs before creating room */}
+              <div className="grid grid-cols-3 gap-2.5 mb-5">
+                <div>
+                  <label
+                    htmlFor="create-room-focus-mins"
+                    className={`block text-[11px] font-semibold mb-1 ${themeConfig.textPrimaryClass}`}
+                  >
+                    Focus (1–180m)
+                  </label>
+                  <input
+                    id="create-room-focus-mins"
+                    type="number"
+                    min={1}
+                    max={180}
+                    value={createFocusMins}
+                    onChange={(e) =>
+                      setCreateFocusMins(
+                        clampRoomCustomMinutes(Number(e.target.value))
+                      )
+                    }
+                    className={`w-full px-2.5 py-2 rounded-xl text-xs font-mono outline-none ${themeConfig.glassInputClass}`}
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="create-room-short-mins"
+                    className={`block text-[11px] font-semibold mb-1 ${themeConfig.textPrimaryClass}`}
+                  >
+                    Short Break (m)
+                  </label>
+                  <input
+                    id="create-room-short-mins"
+                    type="number"
+                    min={1}
+                    max={180}
+                    value={createShortBreakMins}
+                    onChange={(e) =>
+                      setCreateShortBreakMins(
+                        clampRoomCustomMinutes(Number(e.target.value))
+                      )
+                    }
+                    className={`w-full px-2.5 py-2 rounded-xl text-xs font-mono outline-none ${themeConfig.glassInputClass}`}
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="create-room-long-mins"
+                    className={`block text-[11px] font-semibold mb-1 ${themeConfig.textPrimaryClass}`}
+                  >
+                    Long Break (m)
+                  </label>
+                  <input
+                    id="create-room-long-mins"
+                    type="number"
+                    min={1}
+                    max={180}
+                    value={createLongBreakMins}
+                    onChange={(e) =>
+                      setCreateLongBreakMins(
+                        clampRoomCustomMinutes(Number(e.target.value))
+                      )
+                    }
+                    className={`w-full px-2.5 py-2 rounded-xl text-xs font-mono outline-none ${themeConfig.glassInputClass}`}
+                  />
+                </div>
               </div>
             </div>
 
@@ -242,12 +383,16 @@ export function StudyRoomsView({
               className={`w-full py-3 px-4 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 ${themeConfig.buttonBgClass}`}
             >
               <PlusCircle className="w-4 h-4" />
-              <span>{isBusy ? 'Creating Room...' : 'Create 6-Char Study Room'}</span>
+              <span>
+                {isBusy ? 'Creating Room...' : 'Create 6-Char Study Room'}
+              </span>
             </button>
           </div>
 
           {/* Join Room by Code Card */}
-          <div className={`p-6 rounded-2xl ${themeConfig.glassCardClass} flex flex-col justify-between`}>
+          <div
+            className={`p-6 rounded-2xl ${themeConfig.glassCardClass} flex flex-col justify-between`}
+          >
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <DoorOpen
@@ -262,8 +407,8 @@ export function StudyRoomsView({
                 </h2>
               </div>
               <p className={`text-xs mb-4 ${themeConfig.textSecondaryClass}`}>
-                Enter a classmate&apos;s 6-character room code to sync your countdown
-                in real time and earn shared session XP.
+                Enter a classmate&apos;s 6-character room code to sync your
+                countdown in real time and earn shared session XP.
               </p>
 
               <form id="join-room-form" onSubmit={handleJoin} className="mb-4">
@@ -303,13 +448,57 @@ export function StudyRoomsView({
   }
 
   const isHost = activeRoom.hostUid === currentUser.uid;
+  const isTimerRunning = activeRoom.status === 'running';
   const myMemberDoc = roomMembers.find((m) => m.uid === currentUser.uid);
+
+  const getDurationSecForMode = (
+    mode: TimerMode,
+    fMins = hostFocusInput,
+    sMins = hostShortInput,
+    lMins = hostLongInput
+  ) => {
+    const mins =
+      mode === 'focus'
+        ? clampRoomCustomMinutes(fMins)
+        : mode === 'shortBreak'
+          ? clampRoomCustomMinutes(sMins)
+          : clampRoomCustomMinutes(lMins);
+    return mins * 60;
+  };
+
+  const handleHostApplyDurations = async (
+    nextFocus: number,
+    nextShort: number,
+    nextLong: number,
+    targetMode: TimerMode = activeRoom.mode
+  ) => {
+    if (!isHost || isTimerRunning) return;
+    const f = clampRoomCustomMinutes(nextFocus);
+    const s = clampRoomCustomMinutes(nextShort);
+    const l = clampRoomCustomMinutes(nextLong);
+    setHostFocusInput(f);
+    setHostShortInput(s);
+    setHostLongInput(l);
+    const durationSec = getDurationSecForMode(targetMode, f, s, l);
+    await onHostUpdateTimer({
+      mode: targetMode,
+      startedAt: null,
+      durationSec,
+      focusMinutes: f,
+      shortBreakMinutes: s,
+      longBreakMinutes: l,
+      status: 'idle',
+    });
+  };
 
   const handleHostStart = async () => {
     const nowMs = Date.now();
     await onHostUpdateTimer({
       startedAt: nowMs,
       durationSec: activeRoom.durationSec,
+      focusMinutes: clampRoomCustomMinutes(hostFocusInput),
+      shortBreakMinutes: clampRoomCustomMinutes(hostShortInput),
+      longBreakMinutes: clampRoomCustomMinutes(hostLongInput),
       status: 'running',
     });
     await onUpdateMyMemberStatus(
@@ -321,18 +510,24 @@ export function StudyRoomsView({
     await onHostUpdateTimer({
       startedAt: null,
       durationSec: Math.max(10, remainingSeconds),
+      focusMinutes: clampRoomCustomMinutes(hostFocusInput),
+      shortBreakMinutes: clampRoomCustomMinutes(hostShortInput),
+      longBreakMinutes: clampRoomCustomMinutes(hostLongInput),
       status: 'paused',
     });
     await onUpdateMyMemberStatus('idle');
   };
 
   const handleHostReset = async (mode: TimerMode = activeRoom.mode) => {
-    const defaultSec =
-      mode === 'focus' ? 25 * 60 : mode === 'shortBreak' ? 5 * 60 : 15 * 60;
+    if (isTimerRunning && mode !== activeRoom.mode) return;
+    const durationSec = getDurationSecForMode(mode);
     await onHostUpdateTimer({
       mode,
       startedAt: null,
-      durationSec: defaultSec,
+      durationSec,
+      focusMinutes: clampRoomCustomMinutes(hostFocusInput),
+      shortBreakMinutes: clampRoomCustomMinutes(hostShortInput),
+      longBreakMinutes: clampRoomCustomMinutes(hostLongInput),
       status: 'idle',
     });
     await onUpdateMyMemberStatus('idle');
@@ -353,6 +548,11 @@ export function StudyRoomsView({
       status: 'completed',
     });
   };
+
+  const currentConfiguredMinutes = Math.max(
+    1,
+    Math.round(activeRoom.durationSec / 60)
+  );
 
   return (
     <div className="space-y-6">
@@ -416,19 +616,19 @@ export function StudyRoomsView({
         <div
           className={`lg:col-span-7 p-6 sm:p-8 rounded-2xl ${themeConfig.glassCardClass} flex flex-col items-center justify-center text-center`}
         >
-          {/* Mode Tabs (Host can switch) */}
-          <div className="inline-flex p-1 rounded-2xl bg-black/5 dark:bg-white/10 mb-6">
+          {/* Mode Tabs (Host can switch only when timer is not running) */}
+          <div className="inline-flex p-1 rounded-2xl bg-black/5 dark:bg-white/10 mb-5">
             {(['focus', 'shortBreak', 'longBreak'] as TimerMode[]).map((m) => (
               <button
                 key={m}
                 type="button"
-                disabled={!isHost}
+                disabled={!isHost || isTimerRunning}
                 onClick={() => handleHostReset(m)}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                   activeRoom.mode === m
                     ? themeConfig.activeTabClass
                     : themeConfig.textSecondaryClass
-                } disabled:cursor-default`}
+                } disabled:cursor-default disabled:opacity-60`}
               >
                 {ROOM_MODE_LABELS[m]}
               </button>
@@ -448,10 +648,171 @@ export function StudyRoomsView({
             {formatTimeMMSS(remainingSeconds)}
           </div>
 
+          {/* Read-only duration badge visible to all room members */}
+          <div
+            data-testid="room-readonly-durations"
+            className={`inline-flex flex-wrap items-center justify-center gap-2 px-3.5 py-1.5 rounded-xl border ${themeConfig.borderClass} bg-black/5 dark:bg-white/5 text-xs font-mono mb-5 ${themeConfig.textSecondaryClass}`}
+          >
+            <Clock className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              Room Durations: Focus {roomFocusMins}m · Short Break{' '}
+              {roomShortBreakMins}m · Long Break {roomLongBreakMins}m (Active:{' '}
+              {currentConfiguredMinutes}m)
+            </span>
+          </div>
+
+          {/* Host-Only Adjustable Timer Controls (Presets 25/5/15, 50/10/30 + Custom 1-180m) */}
+          {isHost && (
+            <div
+              data-testid="host-room-timer-controls"
+              className={`w-full max-w-lg p-4 rounded-2xl border ${themeConfig.borderClass} bg-black/5 dark:bg-white/5 mb-6 text-left`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-1.5">
+                  <Sliders
+                    className="w-3.5 h-3.5"
+                    style={{ color: themeConfig.accentHex }}
+                  />
+                  <span
+                    className={`text-xs font-bold ${themeConfig.textPrimaryClass}`}
+                  >
+                    Host Timer Settings (1–180 min)
+                  </span>
+                </div>
+
+                {/* Preset Buttons: 25/5/15 & 50/10/30 */}
+                <div className="flex items-center gap-1.5">
+                  {ROOM_DURATION_PRESETS.map((preset) => {
+                    const isSelected =
+                      hostFocusInput === preset.focus &&
+                      hostShortInput === preset.shortBreak &&
+                      hostLongInput === preset.longBreak;
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        disabled={isTimerRunning}
+                        onClick={() =>
+                          void handleHostApplyDurations(
+                            preset.focus,
+                            preset.shortBreak,
+                            preset.longBreak
+                          )
+                        }
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                          isSelected
+                            ? themeConfig.activeTabClass
+                            : `${themeConfig.borderClass} ${themeConfig.textSecondaryClass} ${themeConfig.buttonHoverClass}`
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5">
+                <div>
+                  <label
+                    htmlFor="room-host-focus-minutes"
+                    className={`block text-[11px] font-semibold mb-1 ${themeConfig.textSecondaryClass}`}
+                  >
+                    Focus (min)
+                  </label>
+                  <input
+                    id="room-host-focus-minutes"
+                    type="number"
+                    min={1}
+                    max={180}
+                    disabled={isTimerRunning}
+                    value={hostFocusInput}
+                    onChange={(e) => {
+                      const val = clampRoomCustomMinutes(
+                        Number(e.target.value)
+                      );
+                      void handleHostApplyDurations(
+                        val,
+                        hostShortInput,
+                        hostLongInput
+                      );
+                    }}
+                    className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-mono tabular-nums outline-none disabled:opacity-50 disabled:cursor-not-allowed ${themeConfig.glassInputClass}`}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="room-host-short-minutes"
+                    className={`block text-[11px] font-semibold mb-1 ${themeConfig.textSecondaryClass}`}
+                  >
+                    Short Break (min)
+                  </label>
+                  <input
+                    id="room-host-short-minutes"
+                    type="number"
+                    min={1}
+                    max={180}
+                    disabled={isTimerRunning}
+                    value={hostShortInput}
+                    onChange={(e) => {
+                      const val = clampRoomCustomMinutes(
+                        Number(e.target.value)
+                      );
+                      void handleHostApplyDurations(
+                        hostFocusInput,
+                        val,
+                        hostLongInput
+                      );
+                    }}
+                    className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-mono tabular-nums outline-none disabled:opacity-50 disabled:cursor-not-allowed ${themeConfig.glassInputClass}`}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="room-host-long-minutes"
+                    className={`block text-[11px] font-semibold mb-1 ${themeConfig.textSecondaryClass}`}
+                  >
+                    Long Break (min)
+                  </label>
+                  <input
+                    id="room-host-long-minutes"
+                    type="number"
+                    min={1}
+                    max={180}
+                    disabled={isTimerRunning}
+                    value={hostLongInput}
+                    onChange={(e) => {
+                      const val = clampRoomCustomMinutes(
+                        Number(e.target.value)
+                      );
+                      void handleHostApplyDurations(
+                        hostFocusInput,
+                        hostShortInput,
+                        val
+                      );
+                    }}
+                    className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-mono tabular-nums outline-none disabled:opacity-50 disabled:cursor-not-allowed ${themeConfig.glassInputClass}`}
+                  />
+                </div>
+              </div>
+
+              {isTimerRunning && (
+                <p
+                  className={`text-[11px] mt-2 ${themeConfig.textMutedClass}`}
+                >
+                  Timer durations are locked while a session is running. Pause or
+                  reset to adjust durations.
+                </p>
+              )}
+            </div>
+          )}
+
           <p className={`text-xs mb-6 ${themeConfig.textSecondaryClass}`}>
             {isHost
               ? 'You are the room host. Starting the timer broadcasts startedAt and durationSec to all members.'
-              : 'Synced to host timer via real-time Firestore snapshot.'}
+              : 'Synced to host timer via real-time Firestore snapshot (read-only).'}
           </p>
 
           {isHost ? (
@@ -496,7 +857,7 @@ export function StudyRoomsView({
             </div>
           ) : (
             <div className="text-xs font-medium px-4 py-2 rounded-xl bg-black/5 dark:bg-white/10">
-              Waiting for host to control shared timer...
+              Read-only member view · Waiting for host to control shared timer...
             </div>
           )}
         </div>
@@ -585,3 +946,4 @@ export function StudyRoomsView({
     </div>
   );
 }
+

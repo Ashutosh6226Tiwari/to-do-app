@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
+  signInWithEmailAndPassword,
   signInWithPopup,
   signOut as firebaseSignOut,
 } from 'firebase/auth';
@@ -29,6 +30,7 @@ import {
   UserProfile,
 } from '../types';
 import {
+  clampRoomCustomMinutes,
   getIsoWeekKey,
   getLevelInfo,
   normalizeWeeklyMinutes,
@@ -109,6 +111,49 @@ void testConnection();
 
 export async function signInWithGooglePopup() {
   return signInWithPopup(auth, googleProvider);
+}
+
+/**
+ * Signs in an Admin user using Firebase Authentication Email/Password (signInWithEmailAndPassword).
+ * No credentials are ever hardcoded; maps Firebase Auth error codes to clear messages.
+ */
+export async function signInAdminWithEmailPassword(
+  email: string,
+  password: string
+) {
+  const trimmedEmail = email.trim();
+  if (!trimmedEmail || !password) {
+    throw new Error('Please enter both your admin email and password.');
+  }
+  try {
+    return await signInWithEmailAndPassword(auth, trimmedEmail, password);
+  } catch (err: unknown) {
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? String((err as { code?: string }).code)
+        : '';
+    if (
+      code === 'auth/invalid-credential' ||
+      code === 'auth/user-not-found' ||
+      code === 'auth/wrong-password'
+    ) {
+      throw new Error('Invalid admin email or password. Please verify your credentials.');
+    }
+    if (code === 'auth/invalid-email') {
+      throw new Error('Please enter a valid email address.');
+    }
+    if (code === 'auth/too-many-requests') {
+      throw new Error('Too many failed sign-in attempts. Please wait a moment and try again.');
+    }
+    if (code === 'auth/operation-not-allowed') {
+      throw new Error(
+        'Email/Password sign-in is not enabled yet in Firebase Console (Authentication -> Sign-in method).'
+      );
+    }
+    throw new Error(
+      err instanceof Error ? err.message : 'Unable to sign in with Email and Password.'
+    );
+  }
 }
 
 export async function signOutUser() {
@@ -221,6 +266,10 @@ export async function claimUsernameAndInitializeCloudUser(params: {
     tasks: localTasks.slice(0, 200),
     settings: localProfile.timerSettings,
     theme: localProfile.theme,
+    dailyGoalHours: Math.max(
+      0,
+      Math.min(16, Number(localProfile.dailyGoalHours) || 0)
+    ),
   });
 
   // Migrate up to 25 recent local sessions into users/{uid}/sessions/{id}
@@ -249,7 +298,7 @@ export async function claimUsernameAndInitializeCloudUser(params: {
 }
 
 /**
- * Syncs private appState (tasks, settings, theme) to users/{uid}/private/appState.
+ * Syncs private appState (tasks, settings, theme, dailyGoalHours) to users/{uid}/private/appState.
  */
 export async function syncPrivateAppStateToCloud(
   uid: string,
@@ -262,6 +311,10 @@ export async function syncPrivateAppStateToCloud(
       tasks: tasks.slice(0, 200),
       settings: profile.timerSettings,
       theme: profile.theme,
+      dailyGoalHours: Math.max(
+        0,
+        Math.min(16, Number(profile.dailyGoalHours) || 0)
+      ),
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -497,16 +550,33 @@ export async function removeCloudFriendship(
 export async function createCloudStudyRoom(
   code: string,
   host: CloudUserDoc,
-  durationSec = 25 * 60
+  durationSec = 25 * 60,
+  roomDurations?: {
+    focusMinutes?: number;
+    shortBreakMinutes?: number;
+    longBreakMinutes?: number;
+  }
 ): Promise<StudyRoomDoc> {
   const cleanCode = code.trim().toUpperCase();
+  const focusMinutes = clampRoomCustomMinutes(
+    roomDurations?.focusMinutes ?? Math.round(durationSec / 60)
+  );
+  const shortBreakMinutes = clampRoomCustomMinutes(
+    roomDurations?.shortBreakMinutes ?? 5
+  );
+  const longBreakMinutes = clampRoomCustomMinutes(
+    roomDurations?.longBreakMinutes ?? 15
+  );
   const roomData: Omit<StudyRoomDoc, 'code'> = {
     hostUid: host.uid,
     memberUids: [host.uid],
     maxMembers: 10,
     mode: 'focus',
     startedAt: null,
-    durationSec,
+    durationSec: Math.max(10, Math.min(10800, focusMinutes * 60)),
+    focusMinutes,
+    shortBreakMinutes,
+    longBreakMinutes,
     status: 'idle',
     createdAt: new Date().toISOString(),
   };
@@ -600,7 +670,7 @@ export async function leaveCloudStudyRoom(
 }
 
 /**
- * Host updates the shared Study Room timer (writing startedAt, durationSec, mode, status).
+ * Host updates the shared Study Room timer (writing startedAt, durationSec, mode, status, and optional custom durations).
  */
 export async function updateCloudRoomTimer(
   code: string,
@@ -609,10 +679,22 @@ export async function updateCloudRoomTimer(
     mode?: TimerMode;
     startedAt?: number | null;
     durationSec?: number;
+    focusMinutes?: number;
+    shortBreakMinutes?: number;
+    longBreakMinutes?: number;
     status?: 'idle' | 'running' | 'paused' | 'completed';
   }
 ): Promise<void> {
   const cleanCode = code.trim().toUpperCase();
+  const focusMinutes = clampRoomCustomMinutes(
+    patch.focusMinutes ?? room.focusMinutes ?? 25
+  );
+  const shortBreakMinutes = clampRoomCustomMinutes(
+    patch.shortBreakMinutes ?? room.shortBreakMinutes ?? 5
+  );
+  const longBreakMinutes = clampRoomCustomMinutes(
+    patch.longBreakMinutes ?? room.longBreakMinutes ?? 15
+  );
   const nextPayload: Omit<StudyRoomDoc, 'code'> = {
     hostUid: room.hostUid,
     memberUids: room.memberUids,
@@ -620,7 +702,13 @@ export async function updateCloudRoomTimer(
     mode: patch.mode ?? room.mode,
     startedAt:
       patch.startedAt !== undefined ? patch.startedAt : room.startedAt,
-    durationSec: patch.durationSec ?? room.durationSec,
+    durationSec: Math.max(
+      10,
+      Math.min(10800, Math.round(patch.durationSec ?? room.durationSec))
+    ),
+    focusMinutes,
+    shortBreakMinutes,
+    longBreakMinutes,
     status: patch.status ?? room.status,
   };
   if (room.createdAt) {

@@ -12,10 +12,12 @@ import {
   BookOpen,
   Calendar,
   DoorOpen,
+  KeyRound,
   Loader2,
   LogIn,
   LogOut,
   Pause,
+  Pencil,
   Settings,
   ShieldAlert,
   Timer,
@@ -39,11 +41,13 @@ import {
 } from './types';
 import {
   calculateSessionXP,
+  clampRoomCustomMinutes,
   CompletedSessionOutcome,
   computeRemainingSeconds,
   computeStudyStats,
   createInitialTimerState,
   evaluateTimerTick,
+  formatDailyGoalLabel,
   formatDateKey,
   formatTimeMMSS,
   generateRoomCode,
@@ -82,6 +86,7 @@ import {
   respondToCloudFriendRequest,
   saveCloudTrack,
   sendCloudFriendRequest,
+  signInAdminWithEmailPassword,
   signInWithGooglePopup,
   signOutUser,
   syncPrivateAppStateToCloud,
@@ -98,6 +103,7 @@ import { StudyRoomsView } from './components/StudyRoomsView';
 import { AdminTracksView } from './components/AdminTracksView';
 import { StatsView } from './components/StatsView';
 import { ProfileSettingsView } from './components/ProfileSettingsView';
+import { DailyGoalModal } from './components/DailyGoalModal';
 import {
   GoogleSignInScreen,
   UsernameClaimModal,
@@ -269,9 +275,7 @@ export default function App() {
 
   // Cloud User Doc & Social / Room / Tracks State
   const [cloudUserDoc, setCloudUserDoc] = useState<CloudUserDoc | null>(null);
-  const [localRoleOverride, setLocalRoleOverride] = useState<'user' | 'admin'>(
-    'user'
-  );
+  const [isDailyGoalModalOpen, setIsDailyGoalModalOpen] = useState(false);
   const [friends, setFriends] = useState<CloudUserDoc[]>(() =>
     getInitialDemoFriendsList(currentWeekKey)
   );
@@ -356,7 +360,7 @@ export default function App() {
       weeklyMinutes: stats.minutesThisWeek,
       weekKey: currentWeekKey,
       studyingNow: timerState.isRunning && timerState.mode === 'focus',
-      role: localRoleOverride,
+      role: 'user',
       createdAt: '2026-10-01T08:00:00.000Z',
     };
   }, [
@@ -371,7 +375,6 @@ export default function App() {
     stats.minutesThisWeek,
     timerState.isRunning,
     timerState.mode,
-    localRoleOverride,
   ]);
 
   // Listen to Firebase Auth state
@@ -450,15 +453,24 @@ export default function App() {
           tasks?: StudyTask[];
           settings?: TimerSettings;
           theme?: MoodThemeId;
+          dailyGoalHours?: number;
         };
         if (Array.isArray(data.tasks)) {
           setTasks(data.tasks);
         }
-        if (data.settings || data.theme) {
+        if (
+          data.settings ||
+          data.theme ||
+          typeof data.dailyGoalHours === 'number'
+        ) {
           setProfile((prev) => ({
             ...prev,
             theme: data.theme || prev.theme,
             timerSettings: data.settings || prev.timerSettings,
+            dailyGoalHours:
+              typeof data.dailyGoalHours === 'number'
+                ? Math.max(0, Math.min(16, data.dailyGoalHours))
+                : prev.dailyGoalHours,
           }));
         }
       },
@@ -894,6 +906,33 @@ export default function App() {
     }
   };
 
+  const handleAdminEmailSignIn = async (email: string, password: string) => {
+    setIsSigningIn(true);
+    setAuthError(null);
+    try {
+      await signInAdminWithEmailPassword(email, password);
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Unable to sign in with Email and Password.';
+      setAuthError(msg);
+      throw err;
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleOpenSignInScreen = () => {
+    setAuthError(null);
+    setLocalWorkspaceBypass(false);
+    try {
+      localStorage.setItem(STORAGE_KEYS.LOCAL_BYPASS, 'false');
+    } catch {
+      // ignore
+    }
+  };
+
   const handleClaimUsername = async (chosenUsername: string) => {
     if (!firebaseUser) return;
     setIsClaimingUsername(true);
@@ -946,6 +985,15 @@ export default function App() {
     } catch {
       // ignore
     }
+  };
+
+  const handleSaveDailyGoalHours = (nextGoalHours: number) => {
+    const safeGoal = Math.max(0, Math.min(16, Number(nextGoalHours) || 0));
+    setProfile((prev) => {
+      const next = { ...prev, dailyGoalHours: safeGoal };
+      syncTasksAndProfileIfNeeded(tasks, next);
+      return next;
+    });
   };
 
   // Global Timer Controls
@@ -1249,14 +1297,35 @@ export default function App() {
   };
 
   // Study Rooms handlers (Cloud + Local Workspace support)
-  const handleCreateRoom = async (durationMinutes: number) => {
+  const handleCreateRoom = async (
+    durationMinutes: number,
+    roomDurations?: {
+      focusMinutes: number;
+      shortBreakMinutes: number;
+      longBreakMinutes: number;
+    }
+  ) => {
     const code = generateRoomCode();
-    const durationSec = Math.max(1, durationMinutes) * 60;
+    const focusMinutes = clampRoomCustomMinutes(
+      roomDurations?.focusMinutes ?? durationMinutes
+    );
+    const shortBreakMinutes = clampRoomCustomMinutes(
+      roomDurations?.shortBreakMinutes ?? 5
+    );
+    const longBreakMinutes = clampRoomCustomMinutes(
+      roomDurations?.longBreakMinutes ?? 15
+    );
+    const durationSec = focusMinutes * 60;
     if (firebaseUser && !needsUsernameClaim) {
       const created = await createCloudStudyRoom(
         code,
         effectiveUserDoc,
-        durationSec
+        durationSec,
+        {
+          focusMinutes,
+          shortBreakMinutes,
+          longBreakMinutes,
+        }
       );
       setActiveRoom(created);
       setRoomMembers([
@@ -1278,6 +1347,9 @@ export default function App() {
       mode: 'focus',
       startedAt: null,
       durationSec,
+      focusMinutes,
+      shortBreakMinutes,
+      longBreakMinutes,
       status: 'idle',
       createdAt: new Date().toISOString(),
     });
@@ -1307,6 +1379,9 @@ export default function App() {
       mode: 'focus',
       startedAt: Date.now() - 30_000,
       durationSec: 25 * 60,
+      focusMinutes: 25,
+      shortBreakMinutes: 5,
+      longBreakMinutes: 15,
       status: 'running',
       createdAt: new Date().toISOString(),
     });
@@ -1345,6 +1420,9 @@ export default function App() {
     mode?: TimerMode;
     startedAt?: number | null;
     durationSec?: number;
+    focusMinutes?: number;
+    shortBreakMinutes?: number;
+    longBreakMinutes?: number;
     status?: 'idle' | 'running' | 'paused' | 'completed';
   }) => {
     if (!activeRoom) return;
@@ -1543,11 +1621,20 @@ export default function App() {
           isSigningIn={isSigningIn}
           authError={authError}
           onGoogleSignIn={handleGoogleSignIn}
+          onAdminEmailSignIn={handleAdminEmailSignIn}
           onContinueLocalMode={handleContinueLocalMode}
         />
       </div>
     );
   }
+
+  const dailyGoalProgressPercent =
+    profile.dailyGoalHours > 0
+      ? Math.min(
+          100,
+          Math.round((stats.hoursToday / profile.dailyGoalHours) * 100)
+        )
+      : 100;
 
   return (
     <div
@@ -1557,6 +1644,15 @@ export default function App() {
       style={{ fontFamily: themeConfig.fontBody }}
     >
       <MoodBackground theme={profile.theme} />
+
+      {/* Daily Goal Dialog */}
+      <DailyGoalModal
+        isOpen={isDailyGoalModalOpen}
+        currentGoalHours={profile.dailyGoalHours}
+        themeConfig={themeConfig}
+        onClose={() => setIsDailyGoalModalOpen(false)}
+        onSaveGoalHours={handleSaveDailyGoalHours}
+      />
 
       {/* First-Login Unique Username Claim Modal */}
       {firebaseUser && needsUsernameClaim && (
@@ -1628,22 +1724,35 @@ export default function App() {
           <div
             className={`p-3.5 rounded-xl border ${themeConfig.borderClass} bg-white/30 dark:bg-slate-900/30`}
           >
-            <div className="flex items-center justify-between text-xs font-semibold">
-              <span className={themeConfig.textPrimaryClass}>Daily Goal</span>
-              <span
-                className={`font-mono tabular-nums ${themeConfig.textSecondaryClass}`}
-              >
-                {stats.hoursToday}h / {profile.dailyGoalHours}h
+            <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+              <span className={`whitespace-nowrap ${themeConfig.textPrimaryClass}`}>
+                Daily Goal
               </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span
+                  data-testid="sidebar-daily-goal-text"
+                  className={`font-mono tabular-nums whitespace-nowrap ${themeConfig.textSecondaryClass}`}
+                >
+                  {stats.hoursToday}h /{' '}
+                  {formatDailyGoalLabel(profile.dailyGoalHours)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsDailyGoalModalOpen(true)}
+                  aria-label="Set daily goal"
+                  data-testid="sidebar-edit-daily-goal"
+                  className={`p-1 rounded-lg border transition-all ${themeConfig.borderClass} ${themeConfig.textSecondaryClass} ${themeConfig.buttonHoverClass}`}
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+              </div>
             </div>
             <div className="w-full h-2 rounded-full bg-black/10 dark:bg-white/15 overflow-hidden mt-2">
               <div
+                data-testid="sidebar-daily-goal-bar"
                 className="h-full rounded-full transition-all duration-500"
                 style={{
-                  width: `${Math.min(
-                    100,
-                    Math.round((stats.hoursToday / profile.dailyGoalHours) * 100)
-                  )}%`,
+                  width: `${dailyGoalProgressPercent}%`,
                   backgroundColor: themeConfig.accentHex,
                 }}
               />
@@ -1660,15 +1769,27 @@ export default function App() {
               <span>Sign Out (@{effectiveUserDoc.username})</span>
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={handleGoogleSignIn}
-              disabled={isSigningIn}
-              className={`w-full py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 ${themeConfig.buttonBgClass}`}
-            >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>{isSigningIn ? 'Signing in...' : 'Sign in with Google'}</span>
-            </button>
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isSigningIn}
+                className={`w-full py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 ${themeConfig.buttonBgClass}`}
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>
+                  {isSigningIn ? 'Signing in...' : 'Sign in with Google'}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenSignInScreen}
+                className={`w-full py-1.5 px-3 rounded-xl text-[11px] font-semibold border flex items-center justify-center gap-1.5 ${themeConfig.borderClass} ${themeConfig.textSecondaryClass} ${themeConfig.buttonHoverClass}`}
+              >
+                <KeyRound className="w-3 h-3" />
+                <span>Admin Login</span>
+              </button>
+            </div>
           )}
         </div>
       </aside>
@@ -1772,6 +1893,7 @@ export default function App() {
               profile={profile}
               levelInfo={levelInfo}
               currentStreak={stats.currentStreak}
+              hoursToday={stats.hoursToday}
               themeConfig={themeConfig}
               onUpdateProfile={(nextProfile) => {
                 setProfile(nextProfile);
@@ -1788,16 +1910,13 @@ export default function App() {
                   setRemainingSeconds(Math.ceil(nextMs / 1000));
                 }
               }}
+              onOpenDailyGoalModal={() => setIsDailyGoalModalOpen(true)}
               onResetDemoData={handleResetDemoData}
               cloudUser={effectiveUserDoc}
               isCloudConnected={Boolean(firebaseUser && !needsUsernameClaim)}
               onGoogleSignIn={handleGoogleSignIn}
+              onOpenSignInScreen={handleOpenSignInScreen}
               onSignOut={handleSignOut}
-              onToggleLocalAdminRole={() => {
-                setLocalRoleOverride((prev) =>
-                  prev === 'admin' ? 'user' : 'admin'
-                );
-              }}
             />
           )}
 

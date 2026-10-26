@@ -671,3 +671,59 @@ export function computeSharedRoomRemainingSeconds(
   return Math.ceil(remainingMs / 1000);
 }
 
+/**
+ * Clamps a Study Room custom duration in minutes to an integer between 1 and 180.
+ */
+export function clampRoomCustomMinutes(rawMinutes: number): number {
+  if (!Number.isFinite(rawMinutes)) return 25;
+  return Math.max(1, Math.min(180, Math.round(rawMinutes)));
+}
+
+/**
+ * Converts decimal dailyGoalHours into { hours: 0..16, minutes: 0..55 (5-min steps) }.
+ */
+export function splitDailyGoalHoursToHoursMinutes(dailyGoalHours: number): {
+  hours: number;
+  minutes: number;
+} {
+  const clampedTotalMinutes = Math.max(
+    0,
+    Math.min(16 * 60, Math.round((Number(dailyGoalHours) || 0) * 60))
+  );
+  const snappedTotalMinutes = Math.round(clampedTotalMinutes / 5) * 5;
+  const hours = Math.min(16, Math.floor(snappedTotalMinutes / 60));
+  const minutes = hours === 16 ? 0 : snappedTotalMinutes % 60;
+  return { hours, minutes };
+}
+
+/**
+ * Combines hours (0..16) and minutes (0..55, 5-min steps) into decimal dailyGoalHours (0..16).
+ */
+export function combineDailyGoalHoursAndMinutes(
+  rawHours: number,
+  rawMinutes: number
+): number {
+  const safeHours = Math.max(0, Math.min(16, Math.floor(Number(rawHours) || 0)));
+  const snappedMinutes =
+    safeHours === 16
+      ? 0
+      : Math.max(
+          0,
+          Math.min(55, Math.round((Number(rawMinutes) || 0) / 5) * 5)
+        );
+  const totalHours = safeHours + snappedMinutes / 60;
+  return Number(Math.min(16, Math.max(0, totalHours)).toFixed(4));
+}
+
+/**
+ * Formats decimal dailyGoalHours into a concise human-readable string (e.g. "2h", "2h 30m", "45m").
+ */
+export function formatDailyGoalLabel(dailyGoalHours: number): string {
+  const { hours, minutes } = splitDailyGoalHoursToHoursMinutes(dailyGoalHours);
+  if (hours === 0 && minutes === 0) return '0h';
+  if (hours > 0 && minutes === 0) return `${hours}h`;
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${minutes}m`;
+}
+
+

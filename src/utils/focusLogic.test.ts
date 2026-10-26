@@ -211,3 +211,36 @@ test('ISO weekKey, weeklyMinutes rollover, username validation, and shared room 
   );
 });
 
+test('room adjustable timer custom minutes clamping (1..180) and daily goal hours/minutes (0..16h, 5m steps) work accurately', async () => {
+  const {
+    clampRoomCustomMinutes,
+    splitDailyGoalHoursToHoursMinutes,
+    combineDailyGoalHoursAndMinutes,
+    formatDailyGoalLabel,
+  } = await import('./focusLogic');
+
+  assert.equal(clampRoomCustomMinutes(0), 1);
+  assert.equal(clampRoomCustomMinutes(-10), 1);
+  assert.equal(clampRoomCustomMinutes(50), 50);
+  assert.equal(clampRoomCustomMinutes(180), 180);
+  assert.equal(clampRoomCustomMinutes(240), 180);
+
+  const combined = combineDailyGoalHoursAndMinutes(2, 30);
+  assert.equal(combined, 2.5);
+  assert.deepEqual(splitDailyGoalHoursToHoursMinutes(2.5), {
+    hours: 2,
+    minutes: 30,
+  });
+  assert.equal(formatDailyGoalLabel(2.5), '2h 30m');
+  assert.equal(formatDailyGoalLabel(3), '3h');
+  assert.equal(formatDailyGoalLabel(0.75), '45m');
+
+  // 16h cap zeroes out extra minutes
+  assert.equal(combineDailyGoalHoursAndMinutes(16, 45), 16);
+  assert.deepEqual(splitDailyGoalHoursToHoursMinutes(16), {
+    hours: 16,
+    minutes: 0,
+  });
+});
+
+
