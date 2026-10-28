@@ -16,19 +16,24 @@ interface AuthGateScreenProps {
   themeConfig: MoodThemeConfig;
   isSigningIn: boolean;
   authError: string | null;
-  onGoogleSignIn: () => void;
+  initialName?: string;
+  onGoogleSignIn: (enteredName?: string) => void;
   onAdminEmailSignIn: (email: string, password: string) => Promise<void>;
-  onContinueLocalMode: () => void;
+  onContinueLocalMode: (enteredName?: string) => void;
 }
 
 export function GoogleSignInScreen({
   themeConfig,
   isSigningIn,
   authError,
+  initialName = '',
   onGoogleSignIn,
   onAdminEmailSignIn,
   onContinueLocalMode,
 }: AuthGateScreenProps) {
+  const [guestName, setGuestName] = useState(
+    initialName && initialName !== 'Guest' ? initialName : ''
+  );
   const [showAdminForm, setShowAdminForm] = useState(false);
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
@@ -55,11 +60,14 @@ export function GoogleSignInScreen({
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 sm:p-6 relative z-20">
+    <div
+      data-testid="welcome-screen"
+      className="min-h-screen flex items-center justify-center p-4 sm:p-6 relative z-20"
+    >
       <div
         className={`w-full max-w-md p-6 sm:p-8 rounded-3xl shadow-2xl border ${themeConfig.glassCardClass}`}
       >
-        <div className="mb-6">
+        <div className="mb-5">
           <LumoLogo
             themeConfig={themeConfig}
             variant="wide"
@@ -69,38 +77,44 @@ export function GoogleSignInScreen({
           />
         </div>
 
-        <div className="space-y-3 mb-6">
+        <div className="space-y-3 mb-5">
           <h2
             className={`text-lg font-bold ${themeConfig.textPrimaryClass}`}
             style={{ fontFamily: themeConfig.fontDisplay }}
           >
-            Sign in to sync your study flow
+            Welcome to Lumo
           </h2>
           <p
             className={`text-xs leading-relaxed ${themeConfig.textSecondaryClass}`}
           >
-            Sign in with Google to claim your unique student username, back up
-            your existing localStorage tasks & XP to Firestore, compete on
-            Friend Leaderboards, and join live Study Rooms.
+            Start focusing right away as a guest, or sign in with Google to
+            sync across devices, add friends, join study rooms, and unlock AI
+            study tools.
           </p>
 
-          <div
-            className={`p-3.5 rounded-2xl border ${themeConfig.borderClass} bg-black/5 dark:bg-white/5 space-y-2 text-xs ${themeConfig.textSecondaryClass}`}
-          >
-            <div className="flex items-center gap-2">
-              <Cloud className="w-4 h-4 shrink-0 text-sky-500" />
-              <span>Automatic one-time local data migration to Firestore</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 shrink-0 text-amber-500" />
-              <span>
-                Real-time Study Rooms (up to 10 students) & Leaderboards
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-500" />
-              <span>Zero-trust Firestore security rules & role protection</span>
-            </div>
+          <div>
+            <label
+              htmlFor="welcome-name-input"
+              className={`block text-xs font-semibold mb-1.5 ${themeConfig.textPrimaryClass}`}
+            >
+              Your Name
+            </label>
+            <input
+              id="welcome-name-input"
+              data-testid="welcome-name-input"
+              type="text"
+              maxLength={60}
+              value={guestName}
+              onChange={(e) => setGuestName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  onContinueLocalMode(guestName.trim());
+                }
+              }}
+              placeholder="Enter your name (saved locally)"
+              className={`w-full px-3.5 py-2.5 rounded-xl text-sm outline-none ${themeConfig.glassInputClass}`}
+            />
           </div>
         </div>
 
@@ -116,9 +130,19 @@ export function GoogleSignInScreen({
         <div className="space-y-3">
           <button
             type="button"
-            onClick={onGoogleSignIn}
+            data-testid="continue-guest-btn"
+            onClick={() => onContinueLocalMode(guestName.trim())}
+            className={`w-full py-3 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2.5 shadow-md transition-all ${themeConfig.buttonBgClass}`}
+          >
+            <span>Continue as guest</span>
+          </button>
+
+          <button
+            type="button"
+            data-testid="google-signin-btn"
+            onClick={() => onGoogleSignIn(guestName.trim())}
             disabled={isSigningIn}
-            className={`w-full py-3 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2.5 shadow-md transition-all disabled:opacity-60 ${themeConfig.buttonBgClass}`}
+            className={`w-full py-3 px-4 rounded-xl font-semibold text-sm border flex items-center justify-center gap-2.5 transition-all disabled:opacity-60 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
           >
             {isSigningIn && !showAdminForm ? (
               <>
@@ -228,15 +252,6 @@ export function GoogleSignInScreen({
               </form>
             )}
           </div>
-
-          <button
-            type="button"
-            data-testid="continue-guest-btn"
-            onClick={onContinueLocalMode}
-            className={`w-full py-2.5 px-4 rounded-xl font-semibold text-xs border transition-all ${themeConfig.borderClass} ${themeConfig.textSecondaryClass} ${themeConfig.buttonHoverClass}`}
-          >
-            Continue in Local Workspace (Offline / Preview Mode)
-          </button>
         </div>
 
         <div className={`mt-5 pt-3.5 border-t ${themeConfig.borderClass} flex justify-center`}>

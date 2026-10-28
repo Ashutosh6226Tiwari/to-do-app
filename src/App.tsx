@@ -69,6 +69,7 @@ import {
   getInitialProfile,
   getInitialSessions,
   getInitialTasks,
+  getSampleProfile,
 } from './utils/seedData';
 import { MOOD_THEMES } from './utils/themes';
 import { soundEngine } from './utils/soundEngine';
@@ -213,10 +214,9 @@ export default function App() {
         if (params.get('autostart') === '1') return true;
         if (params.get('authgate') === '1') return false;
         const saved = localStorage.getItem(STORAGE_KEYS.LOCAL_BYPASS);
-        if (saved === 'false') return false;
-        return true;
+        return saved === 'true';
       } catch {
-        return true;
+        return false;
       }
     }
   );
@@ -231,7 +231,7 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEYS.PROFILE);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && parsed.name && MOOD_THEMES[parsed.theme as MoodThemeId]) {
+        if (parsed && typeof parsed.name === 'string' && MOOD_THEMES[parsed.theme as MoodThemeId]) {
           return parsed;
         }
       }
@@ -251,7 +251,7 @@ export default function App() {
     } catch {
       // ignore
     }
-    return getInitialTasks(todayKey);
+    return [];
   });
 
   const [sessions, setSessions] = useState<FocusSessionRecord[]>(() => {
@@ -264,7 +264,7 @@ export default function App() {
     } catch {
       // ignore
     }
-    return getInitialSessions(todayKey);
+    return [];
   });
 
   // Global Persisted Timer State (survives tab switches and page refreshes)
@@ -286,7 +286,7 @@ export default function App() {
     } catch {
       // ignore
     }
-    return createInitialTimerState(profile.timerSettings, 'task-1');
+    return createInitialTimerState(profile.timerSettings, null);
   });
 
   const [remainingSeconds, setRemainingSeconds] = useState<number>(() =>
@@ -311,23 +311,10 @@ export default function App() {
   // Cloud User Doc & Social / Room / Tracks State
   const [cloudUserDoc, setCloudUserDoc] = useState<CloudUserDoc | null>(null);
   const [isDailyGoalModalOpen, setIsDailyGoalModalOpen] = useState(false);
-  const [friends, setFriends] = useState<CloudUserDoc[]>(() =>
-    getInitialDemoFriendsList(currentWeekKey, todayKey)
-  );
+  const [friends, setFriends] = useState<CloudUserDoc[]>([]);
   const [friendships, setFriendships] = useState<FriendshipItem[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<FriendRequestItem[]>(
-    [
-      {
-        id: 'req-demo-1',
-        fromUid: 'demo-user-sam',
-        toUid: 'local-student',
-        fromUsername: 'sam_rivera',
-        fromDisplayName: 'Sam Rivera',
-        toUsername: 'maya_lin',
-        status: 'pending',
-        createdAt: '2026-10-25T10:00:00.000Z',
-      },
-    ]
+    []
   );
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequestItem[]>(
     []
@@ -408,11 +395,18 @@ export default function App() {
         studyingNow: timerState.isRunning && timerState.mode === 'focus',
       };
     }
+    const cleanHandle =
+      (profile.name || 'guest')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '') || 'guest';
     return {
       uid: firebaseUser?.uid || 'local-student',
-      displayName: profile.name,
+      displayName: profile.name || 'Guest',
       photoURL: firebaseUser?.photoURL || '',
-      username: 'maya_lin',
+      username: cleanHandle.length >= 3 ? cleanHandle.slice(0, 20) : 'guest_user',
       xp: profile.totalXp,
       level: getLevelInfo(profile.totalXp).level,
       currentStreak: stats.currentStreak,
@@ -976,7 +970,19 @@ export default function App() {
   }, [themeConfig.accentHex]);
 
   // Auth Handlers
-  const handleGoogleSignIn = async () => {
+  const handleGoogleSignIn = async (enteredName?: string) => {
+    if (typeof enteredName === 'string' && enteredName.trim()) {
+      const safeName = sanitizePlainText(enteredName.trim(), 60) || 'Guest';
+      setProfile((prev) => {
+        const next = { ...prev, name: safeName };
+        try {
+          localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    }
     setIsSigningIn(true);
     setAuthError(null);
     try {
@@ -1064,7 +1070,20 @@ export default function App() {
     }
   };
 
-  const handleContinueLocalMode = () => {
+  const handleContinueLocalMode = (enteredName?: string) => {
+    const safeName =
+      typeof enteredName === 'string' && enteredName.trim()
+        ? sanitizePlainText(enteredName.trim(), 60) || 'Guest'
+        : profile.name || 'Guest';
+    setProfile((prev) => {
+      const next = { ...prev, name: safeName };
+      try {
+        localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
     setLocalWorkspaceBypass(true);
     try {
       localStorage.setItem(STORAGE_KEYS.LOCAL_BYPASS, 'true');
@@ -1665,19 +1684,56 @@ export default function App() {
     setCustomTracks((prev) => prev.filter((t) => t.id !== trackId));
   };
 
-  const handleResetDemoData = () => {
-    const freshProfile = getInitialProfile();
-    const freshTasks = getInitialTasks(todayKey);
-    const freshSessions = getInitialSessions(todayKey);
-    const freshTimer = createInitialTimerState(
-      freshProfile.timerSettings,
+  const handleLoadSampleData = () => {
+    const sampleProfile = getSampleProfile();
+    const sampleTasks = getInitialTasks(todayKey);
+    const sampleSessions = getInitialSessions(todayKey);
+    const sampleTimer = createInitialTimerState(
+      sampleProfile.timerSettings,
       'task-1'
     );
-    setProfile(freshProfile);
-    setTasks(freshTasks);
-    setSessions(freshSessions);
-    setTimerState(freshTimer);
-    setRemainingSeconds(computeRemainingSeconds(freshTimer, Date.now()));
+    setProfile(sampleProfile);
+    setTasks(sampleTasks);
+    setSessions(sampleSessions);
+    setFriends(getInitialDemoFriendsList(currentWeekKey, todayKey));
+    setIncomingRequests([
+      {
+        id: 'req-demo-1',
+        fromUid: 'demo-user-sam',
+        toUid: 'local-student',
+        fromUsername: 'sam_rivera',
+        fromDisplayName: 'Sam Rivera',
+        toUsername: 'maya_lin',
+        status: 'pending',
+        createdAt: '2026-10-25T10:00:00.000Z',
+      },
+    ]);
+    setTimerState(sampleTimer);
+    setRemainingSeconds(computeRemainingSeconds(sampleTimer, Date.now()));
+  };
+
+  const handleClearAllData = () => {
+    const cleanProfile = getInitialProfile();
+    const cleanTimer = createInitialTimerState(
+      cleanProfile.timerSettings,
+      null
+    );
+    setProfile(cleanProfile);
+    setTasks([]);
+    setSessions([]);
+    setFriends([]);
+    setIncomingRequests([]);
+    setOutgoingRequests([]);
+    setTimerState(cleanTimer);
+    setRemainingSeconds(computeRemainingSeconds(cleanTimer, Date.now()));
+    try {
+      localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(cleanProfile));
+      localStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify([]));
+      localStorage.setItem(STORAGE_KEYS.TIMER, JSON.stringify(cleanTimer));
+    } catch {
+      // ignore
+    }
   };
 
   // Suppress unused import lint
@@ -1765,6 +1821,7 @@ export default function App() {
           themeConfig={themeConfig}
           isSigningIn={isSigningIn}
           authError={authError}
+          initialName={profile.name}
           onGoogleSignIn={handleGoogleSignIn}
           onAdminEmailSignIn={handleAdminEmailSignIn}
           onContinueLocalMode={handleContinueLocalMode}
@@ -1909,7 +1966,7 @@ export default function App() {
             <div className="space-y-1.5">
               <button
                 type="button"
-                onClick={handleGoogleSignIn}
+                onClick={() => void handleGoogleSignIn()}
                 disabled={isSigningIn}
                 className={`w-full py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 ${themeConfig.buttonBgClass}`}
               >
@@ -1942,7 +1999,7 @@ export default function App() {
       {/* Main Content Area */}
       <div className="flex-1 md:pl-64 flex flex-col min-h-screen pb-24 md:pb-8">
         <HeaderBar
-          studentName={profile.name}
+          studentName={profile.name || 'Guest'}
           levelInfo={levelInfo}
           currentStreak={stats.currentStreak}
           themeConfig={themeConfig}
@@ -1956,12 +2013,38 @@ export default function App() {
           onPauseMiniTimer={handleStartPauseTimer}
         />
 
+        {/* Gentle Guest Mode Banner */}
+        {!firebaseUser && (
+          <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 pt-3">
+            <div
+              data-testid="guest-mode-banner"
+              className={`px-4 py-2.5 rounded-2xl border flex flex-wrap items-center justify-between gap-2 text-xs ${themeConfig.glassCardClass}`}
+            >
+              <span className={themeConfig.textSecondaryClass}>
+                You&apos;re using Lumo as a guest. Friends, study rooms, and AI
+                features need sign-in.
+              </span>
+              <button
+                type="button"
+                data-testid="guest-banner-signin-btn"
+                onClick={handleOpenSignInScreen}
+                className={`px-3 py-1 rounded-xl font-semibold text-xs flex items-center gap-1.5 shrink-0 ${themeConfig.buttonBgClass}`}
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign in</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 pt-6">
           {activeSection === 'planner' && (
             <PlannerView
               tasks={tasks}
               todayKey={todayKey}
               themeConfig={themeConfig}
+              isGuest={!firebaseUser}
+              onRequestSignIn={handleOpenSignInScreen}
               onAddTask={handleAddTask}
               onAddMultipleTasks={handleAddMultipleTasks}
               onUpdateTask={handleUpdateTask}
@@ -1977,6 +2060,8 @@ export default function App() {
               timerState={timerState}
               remainingSeconds={remainingSeconds}
               timerSettings={profile.timerSettings}
+              isGuest={!firebaseUser}
+              onRequestSignIn={handleOpenSignInScreen}
               onStartPause={handleStartPauseTimer}
               onReset={handleResetTimer}
               onSkip={handleSkipTimerSession}
@@ -2003,6 +2088,7 @@ export default function App() {
               themeConfig={themeConfig}
               isCloudConnected={Boolean(firebaseUser && !needsUsernameClaim)}
               todayKey={todayKey}
+              onRequestSignIn={handleOpenSignInScreen}
               onSearchUsername={handleSearchUsername}
               onSendFriendRequest={handleSendFriendRequest}
               onRespondRequest={handleRespondFriendRequest}
@@ -2030,8 +2116,11 @@ export default function App() {
             <StatsView
               stats={stats}
               sessions={sessions}
-              studentName={profile.name}
+              studentName={profile.name || 'Guest'}
               themeConfig={themeConfig}
+              isGuest={!firebaseUser}
+              onRequestSignIn={handleOpenSignInScreen}
+              onStartFocusSession={() => setActiveSection('focus')}
             />
           )}
 
@@ -2045,7 +2134,7 @@ export default function App() {
               onUpdateProfile={(nextProfile) => {
                 const safeNextProfile: UserProfile = {
                   ...nextProfile,
-                  name: sanitizePlainText(nextProfile.name, 80) || 'Student',
+                  name: sanitizePlainText(nextProfile.name, 80) || 'Guest',
                 };
                 setProfile(safeNextProfile);
                 syncTasksAndProfileIfNeeded(tasks, safeNextProfile);
@@ -2069,10 +2158,11 @@ export default function App() {
                 }
               }}
               onOpenDailyGoalModal={() => setIsDailyGoalModalOpen(true)}
-              onResetDemoData={handleResetDemoData}
+              onLoadSampleData={handleLoadSampleData}
+              onClearAllData={handleClearAllData}
               cloudUser={effectiveUserDoc}
               isCloudConnected={Boolean(firebaseUser && !needsUsernameClaim)}
-              onGoogleSignIn={handleGoogleSignIn}
+              onGoogleSignIn={() => void handleGoogleSignIn()}
               onOpenSignInScreen={handleOpenSignInScreen}
               onSignOut={handleSignOut}
             />

@@ -697,3 +697,23 @@ test('distinct procedural Web Audio specs, 3s preview, and curated track error c
   assert.match(blockedLink.message, /blocked link/i);
 });
 
+test('first-run default state starts empty (Level 1, 0 XP, 0 streak, 0 hours) while sample data is opt-in', async () => {
+  const { getInitialProfile, getSampleProfile } = await import('./seedData');
+
+  const initialProfile = getInitialProfile();
+  assert.equal(initialProfile.totalXp, 0);
+  const initialLevel = getLevelInfo(initialProfile.totalXp);
+  assert.equal(initialLevel.level, 1);
+
+  const emptyStats = computeStudyStats([], '2026-10-28');
+  assert.equal(emptyStats.currentStreak, 0);
+  assert.equal(emptyStats.longestStreak, 0);
+  assert.equal(emptyStats.hoursToday, 0);
+  assert.equal(emptyStats.hoursThisWeek, 0);
+
+  const sampleProfile = getSampleProfile();
+  assert.equal(sampleProfile.name, 'Maya Lin');
+  assert.equal(sampleProfile.totalXp, 285);
+});
+
+

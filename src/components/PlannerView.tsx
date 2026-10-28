@@ -36,6 +36,8 @@ interface PlannerViewProps {
   tasks: StudyTask[];
   todayKey: string;
   themeConfig: MoodThemeConfig;
+  isGuest?: boolean;
+  onRequestSignIn?: () => void;
   onAddTask: (task: Omit<StudyTask, 'id' | 'completedPomodoros'>) => void;
   onAddMultipleTasks: (
     tasks: Array<Omit<StudyTask, 'id' | 'completedPomodoros'>>
@@ -50,6 +52,8 @@ export function PlannerView({
   tasks,
   todayKey,
   themeConfig,
+  isGuest = false,
+  onRequestSignIn,
   onAddTask,
   onAddMultipleTasks,
   onUpdateTask,
@@ -292,17 +296,30 @@ export function PlannerView({
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => setIsAiPlanOpen(true)}
-            className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-2 border transition-colors whitespace-nowrap shrink-0 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>AI Study Plan</span>
-          </button>
+          {isGuest ? (
+            <button
+              type="button"
+              data-testid="planner-ai-guest-btn"
+              onClick={() => onRequestSignIn?.()}
+              className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-2 border transition-colors whitespace-nowrap shrink-0 ${themeConfig.borderClass} ${themeConfig.textSecondaryClass} ${themeConfig.buttonHoverClass}`}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Sign in to use AI features</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsAiPlanOpen(true)}
+              className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium flex items-center gap-2 border transition-colors whitespace-nowrap shrink-0 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>AI Study Plan</span>
+            </button>
+          )}
 
           <button
             type="button"
+            data-testid="planner-add-task-btn"
             onClick={() => openAddModal(selectedDate)}
             className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 ${themeConfig.buttonBgClass}`}
           >
@@ -415,21 +432,44 @@ export function PlannerView({
           <div className="space-y-3">
             {filteredTasks.filter((t) => t.date === selectedDate).length ===
             0 ? (
-              <div className="py-12 text-center">
-                <CalendarIcon
-                  className={`w-10 h-10 mx-auto mb-2 opacity-40 ${themeConfig.textMutedClass}`}
-                />
-                <p
-                  className={`text-sm font-medium ${themeConfig.textSecondaryClass}`}
+              <div
+                data-testid="empty-tasks-state"
+                className="py-10 px-4 text-center flex flex-col items-center"
+              >
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-3 border ${themeConfig.borderClass} bg-black/5 dark:bg-white/10`}
                 >
-                  No study tasks scheduled for this day yet.
+                  <CalendarIcon
+                    className="w-6 h-6"
+                    style={{ color: themeConfig.accentHex }}
+                  />
+                </div>
+                <h3
+                  className={`text-sm font-bold ${themeConfig.textPrimaryClass}`}
+                >
+                  {tasks.length === 0
+                    ? 'No study tasks yet'
+                    : 'No study tasks scheduled for this day'}
+                </h3>
+                <p
+                  className={`text-xs mt-1 max-w-sm ${themeConfig.textSecondaryClass}`}
+                >
+                  {tasks.length === 0
+                    ? 'Create your first study task to plan your day and start tracking Pomodoro sessions.'
+                    : 'Schedule a study block or assignment for this day.'}
                 </p>
                 <button
                   type="button"
+                  data-testid="empty-tasks-cta"
                   onClick={() => openAddModal(selectedDate)}
-                  className={`mt-3 px-4 py-2 rounded-xl text-xs font-semibold ${themeConfig.buttonBgClass}`}
+                  className={`mt-4 px-4 py-2 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 ${themeConfig.buttonBgClass}`}
                 >
-                  Schedule Task for This Day
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>
+                    {tasks.length === 0
+                      ? 'Add your first task'
+                      : 'Schedule Task for This Day'}
+                  </span>
                 </button>
               </div>
             ) : (
@@ -440,6 +480,8 @@ export function PlannerView({
                     key={task.id}
                     task={task}
                     themeConfig={themeConfig}
+                    isGuest={isGuest}
+                    onRequestSignIn={onRequestSignIn}
                     isBreakingDown={breakingDownTaskId === task.id}
                     onToggleComplete={() => onToggleTaskComplete(task.id)}
                     onStartFocus={() => onStartFocusTask(task.id)}
@@ -697,10 +739,44 @@ export function PlannerView({
           <div className="space-y-3">
             {filteredTasks.filter((t) => t.date === selectedDate).length ===
             0 ? (
-              <p className={`text-sm py-4 ${themeConfig.textMutedClass}`}>
-                No tasks scheduled on {formatReadableDate(selectedDate)}. Click
-                any day card above or add a new task.
-              </p>
+              <div
+                data-testid="empty-tasks-state"
+                className={`py-8 px-4 rounded-xl border border-dashed ${themeConfig.borderClass} text-center flex flex-col items-center`}
+              >
+                <div
+                  className={`w-11 h-11 rounded-2xl flex items-center justify-center mb-2.5 border ${themeConfig.borderClass} bg-black/5 dark:bg-white/10`}
+                >
+                  <CalendarIcon
+                    className="w-5 h-5"
+                    style={{ color: themeConfig.accentHex }}
+                  />
+                </div>
+                <h3
+                  className={`text-sm font-bold ${themeConfig.textPrimaryClass}`}
+                >
+                  {tasks.length === 0
+                    ? 'No study tasks yet'
+                    : `No tasks scheduled on ${formatReadableDate(selectedDate)}`}
+                </h3>
+                <p
+                  className={`text-xs mt-1 max-w-md ${themeConfig.textSecondaryClass}`}
+                >
+                  {tasks.length === 0
+                    ? 'Add your first study task to organize your schedule and link Pomodoro focus sessions.'
+                    : 'Click any day card above or add a task for this date.'}
+                </p>
+                <button
+                  type="button"
+                  data-testid="empty-tasks-cta"
+                  onClick={() => openAddModal(selectedDate)}
+                  className={`mt-3.5 px-4 py-2 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 ${themeConfig.buttonBgClass}`}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>
+                    {tasks.length === 0 ? 'Add your first task' : 'Add Task'}
+                  </span>
+                </button>
+              </div>
             ) : (
               filteredTasks
                 .filter((t) => t.date === selectedDate)
@@ -709,6 +785,8 @@ export function PlannerView({
                     key={task.id}
                     task={task}
                     themeConfig={themeConfig}
+                    isGuest={isGuest}
+                    onRequestSignIn={onRequestSignIn}
                     isBreakingDown={breakingDownTaskId === task.id}
                     onToggleComplete={() => onToggleTaskComplete(task.id)}
                     onStartFocus={() => onStartFocusTask(task.id)}
@@ -1066,6 +1144,8 @@ export function PlannerView({
 interface TaskCardProps {
   task: StudyTask;
   themeConfig: MoodThemeConfig;
+  isGuest?: boolean;
+  onRequestSignIn?: () => void;
   isBreakingDown: boolean;
   onToggleComplete: () => void;
   onStartFocus: () => void;
@@ -1078,6 +1158,8 @@ interface TaskCardProps {
 function TaskCard({
   task,
   themeConfig,
+  isGuest = false,
+  onRequestSignIn,
   isBreakingDown,
   onToggleComplete,
   onStartFocus,
@@ -1158,16 +1240,29 @@ function TaskCard({
             <span>Start focus</span>
           </button>
 
-          <button
-            type="button"
-            onClick={onBreakDown}
-            disabled={isBreakingDown}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
-            title="Split into Pomodoro subtasks using Gemini"
-          >
-            <ListTree className="w-3.5 h-3.5" />
-            <span>{isBreakingDown ? 'Splitting...' : 'Break Down'}</span>
-          </button>
+          {isGuest ? (
+            <button
+              type="button"
+              data-testid="task-breakdown-guest-btn"
+              onClick={() => onRequestSignIn?.()}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${themeConfig.borderClass} ${themeConfig.textSecondaryClass} ${themeConfig.buttonHoverClass}`}
+              title="Sign in to use AI features"
+            >
+              <ListTree className="w-3.5 h-3.5" />
+              <span>Sign in to use AI features</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onBreakDown}
+              disabled={isBreakingDown}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 whitespace-nowrap shrink-0 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
+              title="Split into Pomodoro subtasks using Gemini"
+            >
+              <ListTree className="w-3.5 h-3.5" />
+              <span>{isBreakingDown ? 'Splitting...' : 'Break Down'}</span>
+            </button>
+          )}
 
           <button
             type="button"

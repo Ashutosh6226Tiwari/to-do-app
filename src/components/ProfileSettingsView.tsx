@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Bell,
   Check,
   Cloud,
+  Database,
   KeyRound,
   LogIn,
   LogOut,
@@ -10,6 +11,7 @@ import {
   Pencil,
   RotateCcw,
   Sliders,
+  Trash2,
   Trophy,
   User,
 } from 'lucide-react';
@@ -42,7 +44,8 @@ interface ProfileSettingsViewProps {
   themeConfig: MoodThemeConfig;
   onUpdateProfile: (next: UserProfile) => void;
   onOpenDailyGoalModal: () => void;
-  onResetDemoData: () => void;
+  onLoadSampleData: () => void;
+  onClearAllData: () => void;
   cloudUser?: CloudUserDoc;
   isCloudConnected?: boolean;
   onGoogleSignIn?: () => void;
@@ -66,7 +69,8 @@ export function ProfileSettingsView({
   themeConfig,
   onUpdateProfile,
   onOpenDailyGoalModal,
-  onResetDemoData,
+  onLoadSampleData,
+  onClearAllData,
   cloudUser,
   isCloudConnected = false,
   onGoogleSignIn,
@@ -77,12 +81,17 @@ export function ProfileSettingsView({
   const [majorInput, setMajorInput] = useState(profile.majorOrGrade);
   const [savedNotice, setSavedNotice] = useState(false);
 
+  useEffect(() => {
+    setNameInput(profile.name);
+    setMajorInput(profile.majorOrGrade);
+  }, [profile.name, profile.majorOrGrade]);
+
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateProfile({
       ...profile,
-      name: nameInput.trim() || 'Student',
-      majorOrGrade: majorInput.trim() || 'College Student',
+      name: nameInput.trim() || 'Guest',
+      majorOrGrade: majorInput.trim(),
     });
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 2500);
@@ -624,7 +633,7 @@ export function ProfileSettingsView({
         </div>
       )}
 
-      {/* 5. LocalStorage Data Controls */}
+      {/* 5. LocalStorage & Sample Data Controls */}
       <div
         className={`p-5 rounded-2xl ${themeConfig.glassCardClass} flex flex-wrap items-center justify-between gap-4`}
       >
@@ -633,21 +642,37 @@ export function ProfileSettingsView({
             className={`text-sm font-bold ${themeConfig.textPrimaryClass}`}
             style={{ fontFamily: themeConfig.fontDisplay }}
           >
-            Local Storage Data
+            Sample &amp; Local Data
           </h3>
           <p className={`text-xs ${themeConfig.textMutedClass}`}>
-            All tasks, Pomodoro sessions, XP, and theme preferences are automatically saved in your browser's localStorage and synced to Firestore on sign-in.
+            Load sample study tasks, focus sessions, and streaks to explore
+            Lumo, or clear all local data to start fresh.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onResetDemoData}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>Reset Demo Data</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            data-testid="load-sample-data-btn"
+            onClick={onLoadSampleData}
+            className={`px-4 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span>Load sample data</span>
+          </button>
+          <button
+            type="button"
+            data-testid="clear-all-data-btn"
+            onClick={onClearAllData}
+            className={`px-4 py-2 rounded-xl text-xs font-semibold border border-rose-500/40 text-rose-500 hover:bg-rose-500/10 flex items-center gap-1.5 transition-colors`}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Clear all data</span>
+          </button>
+        </div>
       </div>
+
+      {/* Suppress unused icon lint */}
+      {false && <RotateCcw />}
 
       {/* 6. About Card with App Name, Version, and Made by Ashu Watermark */}
       <div

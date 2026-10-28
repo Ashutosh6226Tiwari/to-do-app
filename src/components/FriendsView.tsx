@@ -43,6 +43,7 @@ interface FriendsViewProps {
   themeConfig: MoodThemeConfig;
   isCloudConnected: boolean;
   todayKey?: string;
+  onRequestSignIn?: () => void;
   onSearchUsername: (username: string) => Promise<CloudUserDoc | null>;
   onSendFriendRequest: (targetUser: CloudUserDoc) => Promise<void>;
   onRespondRequest: (
@@ -433,6 +434,7 @@ export function FriendsView({
   themeConfig,
   isCloudConnected,
   todayKey: todayKeyProp,
+  onRequestSignIn,
   onSearchUsername,
   onSendFriendRequest,
   onRespondRequest,
@@ -672,9 +674,56 @@ export function FriendsView({
             </p>
 
             {friends.length === 0 ? (
-              <p className={`text-xs ${themeConfig.textMutedClass}`}>
-                No study friends added yet. Search by username below to connect!
-              </p>
+              <div
+                data-testid="empty-friends-state"
+                className={`py-8 px-4 rounded-xl border border-dashed ${themeConfig.borderClass} text-center flex flex-col items-center`}
+              >
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-3 border ${themeConfig.borderClass} bg-black/5 dark:bg-white/10`}
+                >
+                  <Users
+                    className="w-6 h-6"
+                    style={{ color: themeConfig.accentHex }}
+                  />
+                </div>
+                <h3
+                  className={`text-sm font-bold ${themeConfig.textPrimaryClass}`}
+                >
+                  No study friends yet
+                </h3>
+                <p
+                  className={`text-xs mt-1 max-w-sm ${themeConfig.textSecondaryClass}`}
+                >
+                  {isCloudConnected
+                    ? 'Add classmates by their @username to compare daily hours, streaks, and XP on the leaderboard.'
+                    : 'Sign in with Google to connect with real classmates, or search a username below.'}
+                </p>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="empty-friends-cta"
+                    onClick={() => {
+                      const el = document.getElementById(
+                        'friend-username-search-input'
+                      );
+                      el?.focus();
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 ${themeConfig.buttonBgClass}`}
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Find a friend by username</span>
+                  </button>
+                  {!isCloudConnected && onRequestSignIn && (
+                    <button
+                      type="button"
+                      onClick={onRequestSignIn}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-semibold border inline-flex items-center gap-1.5 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
+                    >
+                      <span>Sign in with Google</span>
+                    </button>
+                  )}
+                </div>
+              </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 {friends.map((friend) => {
@@ -828,6 +877,7 @@ export function FriendsView({
                   className={`w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 ${themeConfig.textMutedClass}`}
                 />
                 <input
+                  id="friend-username-search-input"
                   type="text"
                   aria-label="Search student by username"
                   value={searchQuery}

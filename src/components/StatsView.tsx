@@ -22,6 +22,9 @@ interface StatsViewProps {
   sessions: FocusSessionRecord[];
   studentName: string;
   themeConfig: MoodThemeConfig;
+  isGuest?: boolean;
+  onRequestSignIn?: () => void;
+  onStartFocusSession?: () => void;
 }
 
 export function StatsView({
@@ -29,17 +32,39 @@ export function StatsView({
   sessions,
   studentName,
   themeConfig,
+  isGuest = false,
+  onRequestSignIn,
+  onStartFocusSession,
 }: StatsViewProps) {
-  const [insight, setInsight] = useState<WeeklyInsightResponse | null>({
-    headline: `Steady Academic Flow, ${studentName}!`,
-    summary: `You have completed ${stats.hoursThisWeek} hours of focused study this week with a ${stats.currentStreak}-day active streak. Your top focus blocks are concentrated in ${stats.subjectBreakdown[0]?.subject || 'Physics'} and ${stats.subjectBreakdown[1]?.subject || 'Computer Science'}.`,
-    tips: [
-      'Schedule your most mathematically demanding subject during your first Pomodoro block of the day.',
-      'Take a full 15-minute walk after every 4th Pomodoro to consolidate working memory into long-term recall.',
-      'Protect your streak on busy days with at least one focused 25-minute review block.',
-    ],
-  });
+  const [insight, setInsight] = useState<WeeklyInsightResponse | null>(null);
   const [isLoadingInsight, setIsLoadingInsight] = useState(false);
+
+  const defaultInsight: WeeklyInsightResponse =
+    sessions.length === 0
+      ? {
+          headline: `Ready to start your study flow, ${studentName || 'Guest'}!`,
+          summary:
+            'You have 0 hours logged so far. Complete your first Pomodoro focus session to unlock subject analytics and streak coaching.',
+          tips: [
+            'Start with a focused 25-minute Pomodoro block on your highest-priority task.',
+            'Layer calm ambient sounds in the Focus mixer to block out distractions.',
+            'Complete at least one focus session each day to build your study streak.',
+          ],
+        }
+      : {
+          headline: `Steady Academic Flow, ${studentName || 'Student'}!`,
+          summary: `You have completed ${stats.hoursThisWeek} hours of focused study this week with a ${stats.currentStreak}-day active streak.${
+            stats.subjectBreakdown[0]
+              ? ` Your top focus subject is ${stats.subjectBreakdown[0].subject}.`
+              : ''
+          }`,
+          tips: [
+            'Schedule your most demanding subject during your first Pomodoro block of the day.',
+            'Take a full 15-minute walk after every 4th Pomodoro to consolidate working memory into long-term recall.',
+            'Protect your streak on busy days with at least one focused 25-minute review block.',
+          ],
+        };
+  const displayedInsight = insight || defaultInsight;
 
   // Google Search Grounding Study Assistant state (gemini-3.8-flash)
   const [searchQuery, setSearchQuery] = useState('');
@@ -375,27 +400,38 @@ export function StatsView({
                 </h2>
               </div>
 
-              <button
-                type="button"
-                onClick={handleRefreshInsight}
-                disabled={isLoadingInsight}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 ${themeConfig.buttonBgClass}`}
-              >
-                {isLoadingInsight ? 'Analyzing...' : 'Refresh Insight'}
-              </button>
+              {isGuest ? (
+                <button
+                  type="button"
+                  data-testid="stats-ai-insight-guest-btn"
+                  onClick={() => onRequestSignIn?.()}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold border whitespace-nowrap shrink-0 transition-colors ${themeConfig.borderClass} ${themeConfig.textSecondaryClass} ${themeConfig.buttonHoverClass}`}
+                >
+                  Sign in to use AI features
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleRefreshInsight}
+                  disabled={isLoadingInsight}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 ${themeConfig.buttonBgClass}`}
+                >
+                  {isLoadingInsight ? 'Analyzing...' : 'Refresh Insight'}
+                </button>
+              )}
             </div>
 
-            {insight && (
+            {displayedInsight && (
               <div className="space-y-3">
                 <h3
                   className={`text-base font-semibold ${themeConfig.textPrimaryClass}`}
                 >
-                  {insight.headline}
+                  {displayedInsight.headline}
                 </h3>
                 <p
                   className={`text-sm leading-relaxed ${themeConfig.textSecondaryClass}`}
                 >
-                  {insight.summary}
+                  {displayedInsight.summary}
                 </p>
                 <div className="pt-2">
                   <span
@@ -406,7 +442,7 @@ export function StatsView({
                   <ul
                     className={`list-disc list-inside text-xs space-y-1.5 ${themeConfig.textSecondaryClass}`}
                   >
-                    {insight.tips.map((tip, idx) => (
+                    {displayedInsight.tips.map((tip, idx) => (
                       <li key={idx}>{tip}</li>
                     ))}
                   </ul>
@@ -433,23 +469,35 @@ export function StatsView({
             Verify exam dates, formulas, or syllabus topics with live Google Search grounding (<span className="font-mono">gemini-3.8-flash</span>).
           </p>
 
-          <form onSubmit={handleSearchGrounding} className="flex gap-2">
-            <input
-              type="text"
-              aria-label="Search study topic with Google Search grounding"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="e.g., AP Physics C rotational inertia formulas"
-              className={`flex-1 px-3 py-2 rounded-xl text-xs outline-none ${themeConfig.glassInputClass}`}
-            />
+          {isGuest ? (
             <button
-              type="submit"
-              disabled={isSearching || !searchQuery.trim()}
-              className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 disabled:opacity-50 ${themeConfig.buttonBgClass}`}
+              type="button"
+              data-testid="stats-ai-search-guest-btn"
+              onClick={() => onRequestSignIn?.()}
+              className={`w-full py-2.5 px-4 rounded-xl text-xs font-semibold border flex items-center justify-center gap-2 transition-colors ${themeConfig.borderClass} ${themeConfig.textSecondaryClass} ${themeConfig.buttonHoverClass}`}
             >
-              {isSearching ? 'Searching...' : 'Search'}
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Sign in to use AI features</span>
             </button>
-          </form>
+          ) : (
+            <form onSubmit={handleSearchGrounding} className="flex gap-2">
+              <input
+                type="text"
+                aria-label="Search study topic with Google Search grounding"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="e.g., AP Physics C rotational inertia formulas"
+                className={`flex-1 px-3 py-2 rounded-xl text-xs outline-none ${themeConfig.glassInputClass}`}
+              />
+              <button
+                type="submit"
+                disabled={isSearching || !searchQuery.trim()}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 disabled:opacity-50 ${themeConfig.buttonBgClass}`}
+              >
+                {isSearching ? 'Searching...' : 'Search'}
+              </button>
+            </form>
+          )}
 
           {searchResult && (
             <div className="mt-3 pt-3 border-t border-black/10 dark:border-white/15 space-y-2 max-h-48 overflow-y-auto">
@@ -505,54 +553,92 @@ export function StatsView({
           </span>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr
-                className={`border-b text-xs ${themeConfig.borderClass} ${themeConfig.textMutedClass}`}
+        {sessions.length === 0 ? (
+          <div
+            data-testid="empty-history-state"
+            className={`py-10 px-4 rounded-xl border border-dashed ${themeConfig.borderClass} text-center flex flex-col items-center`}
+          >
+            <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-3 border ${themeConfig.borderClass} bg-black/5 dark:bg-white/10`}
+            >
+              <History
+                className="w-6 h-6"
+                style={{ color: themeConfig.accentHex }}
+              />
+            </div>
+            <h3
+              className={`text-sm font-bold ${themeConfig.textPrimaryClass}`}
+            >
+              No focus sessions yet
+            </h3>
+            <p
+              className={`text-xs mt-1 max-w-sm ${themeConfig.textSecondaryClass}`}
+            >
+              Complete your first Pomodoro focus session to build your study
+              history, earn XP, and start your daily streak.
+            </p>
+            {onStartFocusSession && (
+              <button
+                type="button"
+                data-testid="empty-history-cta"
+                onClick={onStartFocusSession}
+                className={`mt-4 px-4 py-2 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 ${themeConfig.buttonBgClass}`}
               >
-                <th className="py-2.5 pr-4 font-semibold">Task</th>
-                <th className="py-2.5 px-4 font-semibold">Subject</th>
-                <th className="py-2.5 px-4 font-semibold">Date</th>
-                <th className="py-2.5 px-4 font-semibold text-right">
-                  Duration
-                </th>
-                <th className="py-2.5 pl-4 font-semibold text-right">
-                  XP Earned
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-black/5 dark:divide-white/10 text-xs sm:text-sm">
-              {sessions.slice(0, 12).map((sess) => (
-                <tr key={sess.id}>
-                  <td
-                    className={`py-2.5 pr-4 font-medium ${themeConfig.textPrimaryClass}`}
-                  >
-                    {sess.taskTitle}
-                  </td>
-                  <td className={`py-2.5 px-4 ${themeConfig.textSecondaryClass}`}>
-                    {sess.subject}
-                  </td>
-                  <td
-                    className={`py-2.5 px-4 font-mono tabular-nums ${themeConfig.textMutedClass}`}
-                  >
-                    {sess.date}
-                  </td>
-                  <td
-                    className={`py-2.5 px-4 font-mono tabular-nums text-right ${themeConfig.textSecondaryClass}`}
-                  >
-                    {sess.durationMinutes}m
-                  </td>
-                  <td
-                    className={`py-2.5 pl-4 font-mono tabular-nums font-semibold text-right ${themeConfig.textPrimaryClass}`}
-                  >
-                    +{sess.xpEarned} XP
-                  </td>
+                <Clock className="w-3.5 h-3.5" />
+                <span>Start a focus session</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr
+                  className={`border-b text-xs ${themeConfig.borderClass} ${themeConfig.textMutedClass}`}
+                >
+                  <th className="py-2.5 pr-4 font-semibold">Task</th>
+                  <th className="py-2.5 px-4 font-semibold">Subject</th>
+                  <th className="py-2.5 px-4 font-semibold">Date</th>
+                  <th className="py-2.5 px-4 font-semibold text-right">
+                    Duration
+                  </th>
+                  <th className="py-2.5 pl-4 font-semibold text-right">
+                    XP Earned
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-black/5 dark:divide-white/10 text-xs sm:text-sm">
+                {sessions.slice(0, 12).map((sess) => (
+                  <tr key={sess.id}>
+                    <td
+                      className={`py-2.5 pr-4 font-medium ${themeConfig.textPrimaryClass}`}
+                    >
+                      {sess.taskTitle}
+                    </td>
+                    <td className={`py-2.5 px-4 ${themeConfig.textSecondaryClass}`}>
+                      {sess.subject}
+                    </td>
+                    <td
+                      className={`py-2.5 px-4 font-mono tabular-nums ${themeConfig.textMutedClass}`}
+                    >
+                      {sess.date}
+                    </td>
+                    <td
+                      className={`py-2.5 px-4 font-mono tabular-nums text-right ${themeConfig.textSecondaryClass}`}
+                    >
+                      {sess.durationMinutes}m
+                    </td>
+                    <td
+                      className={`py-2.5 pl-4 font-mono tabular-nums font-semibold text-right ${themeConfig.textPrimaryClass}`}
+                    >
+                      +{sess.xpEarned} XP
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

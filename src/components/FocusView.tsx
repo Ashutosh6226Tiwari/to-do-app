@@ -32,6 +32,8 @@ interface FocusViewProps {
   timerState: PersistedTimerState;
   remainingSeconds: number;
   timerSettings: TimerSettings;
+  isGuest?: boolean;
+  onRequestSignIn?: () => void;
   onStartPause: () => void;
   onReset: () => void;
   onSkip: () => void;
@@ -58,6 +60,8 @@ export function FocusView({
   timerState,
   remainingSeconds,
   timerSettings,
+  isGuest = false,
+  onRequestSignIn,
   onStartPause,
   onReset,
   onSkip,
@@ -478,23 +482,35 @@ export function FocusView({
             Tell Gemini how you feel right now, and get a tailored mood theme and Pomodoro cadence.
           </p>
 
-          <form onSubmit={handleAskMoodSuggestion} className="flex gap-2">
-            <input
-              type="text"
-              aria-label="How are you feeling right now?"
-              value={feelingInput}
-              onChange={(e) => setFeelingInput(e.target.value)}
-              placeholder="e.g., Feeling overwhelmed by my calculus midterm"
-              className={`flex-1 px-3 py-2 rounded-xl text-xs outline-none ${themeConfig.glassInputClass}`}
-            />
+          {isGuest ? (
             <button
-              type="submit"
-              disabled={isSuggestingMood || !feelingInput.trim()}
-              className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 disabled:opacity-50 ${themeConfig.buttonBgClass}`}
+              type="button"
+              data-testid="focus-ai-guest-btn"
+              onClick={() => onRequestSignIn?.()}
+              className={`w-full py-2.5 px-4 rounded-xl text-xs font-semibold border flex items-center justify-center gap-2 transition-colors ${themeConfig.borderClass} ${themeConfig.textSecondaryClass} ${themeConfig.buttonHoverClass}`}
             >
-              {isSuggestingMood ? 'Thinking...' : 'Suggest'}
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Sign in to use AI features</span>
             </button>
-          </form>
+          ) : (
+            <form onSubmit={handleAskMoodSuggestion} className="flex gap-2">
+              <input
+                type="text"
+                aria-label="How are you feeling right now?"
+                value={feelingInput}
+                onChange={(e) => setFeelingInput(e.target.value)}
+                placeholder="e.g., Feeling overwhelmed by my calculus midterm"
+                className={`flex-1 px-3 py-2 rounded-xl text-xs outline-none ${themeConfig.glassInputClass}`}
+              />
+              <button
+                type="submit"
+                disabled={isSuggestingMood || !feelingInput.trim()}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 disabled:opacity-50 ${themeConfig.buttonBgClass}`}
+              >
+                {isSuggestingMood ? 'Thinking...' : 'Suggest'}
+              </button>
+            </form>
+          )}
 
           {moodSuggestion && (
             <div className="mt-3 pt-3 border-t border-black/10 dark:border-white/15 space-y-2">

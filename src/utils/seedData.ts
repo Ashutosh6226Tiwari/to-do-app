@@ -7,6 +7,25 @@ import { addDays, formatDateKey } from './focusLogic';
 
 export function getInitialProfile(): UserProfile {
   return {
+    name: 'Guest',
+    majorOrGrade: '',
+    dailyGoalHours: 2,
+    totalXp: 0, // Level 1 Novice
+    theme: 'calm',
+    shareStatsWithFriends: true,
+    timerSettings: {
+      focusMinutes: 25,
+      shortBreakMinutes: 5,
+      longBreakMinutes: 15,
+      autoSwitchModes: true,
+      soundAlertEnabled: true,
+      alertTone: 'chime',
+    },
+  };
+}
+
+export function getSampleProfile(): UserProfile {
+  return {
     name: 'Maya Lin',
     majorOrGrade: 'B.S. Computer Science & Physics',
     dailyGoalHours: 3.5,
