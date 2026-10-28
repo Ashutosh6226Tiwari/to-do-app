@@ -1,4 +1,5 @@
 import {
+  CloudUserDoc,
   FocusSessionRecord,
   LevelTitle,
   PersistedTimerState,
@@ -815,5 +816,703 @@ export function evaluatePerUserRateLimit(
     retryAfterSec: 0,
   };
 }
+
+export type BuiltInSoundCategory = 'Nature' | 'Noise' | 'Beats' | 'Brainwaves';
+
+export type BuiltInTrackId =
+  | 'rain'
+  | 'lofi'
+  | 'whitenoise'
+  | 'brownnoise'
+  | 'pinknoise'
+  | 'ocean'
+  | 'thunderstorm'
+  | 'fireplace'
+  | 'birds'
+  | 'crickets'
+  | 'alphawaves'
+  | 'lofichill';
+
+export interface BuiltInSoundSpec {
+  id: BuiltInTrackId;
+  label: string;
+  category: BuiltInSoundCategory;
+  description: string;
+  note?: string;
+}
+
+export const BUILT_IN_SOUND_CATEGORIES: readonly BuiltInSoundCategory[] = [
+  'Nature',
+  'Noise',
+  'Beats',
+  'Brainwaves',
+] as const;
+
+export const BUILT_IN_SOUNDS: readonly BuiltInSoundSpec[] = [
+  // Nature
+  {
+    id: 'rain',
+    label: 'Rain',
+    category: 'Nature',
+    description: 'Gentle steady rainfall',
+  },
+  {
+    id: 'ocean',
+    label: 'Ocean Waves',
+    category: 'Nature',
+    description: 'Rhythmic rolling surf & shore wash',
+  },
+  {
+    id: 'thunderstorm',
+    label: 'Thunderstorm',
+    category: 'Nature',
+    description: 'Rain with warm distant thunder rumbles',
+  },
+  {
+    id: 'fireplace',
+    label: 'Fireplace',
+    category: 'Nature',
+    description: 'Cozy hearth warmth & wood crackles',
+  },
+  {
+    id: 'birds',
+    label: 'Forest Birds',
+    category: 'Nature',
+    description: 'Peaceful canopy breeze & soft bird calls',
+  },
+  {
+    id: 'crickets',
+    label: 'Night Crickets',
+    category: 'Nature',
+    description: 'Calm evening chorus under the stars',
+  },
+  // Noise
+  {
+    id: 'whitenoise',
+    label: 'White Noise',
+    category: 'Noise',
+    description: 'Classic soft-filtered masking noise',
+  },
+  {
+    id: 'pinknoise',
+    label: 'Pink Noise',
+    category: 'Noise',
+    description: 'Balanced 1/f octave spectrum for focus',
+  },
+  {
+    id: 'brownnoise',
+    label: 'Brown Noise',
+    category: 'Noise',
+    description: 'Deep, warm low-frequency rumble',
+  },
+  // Beats
+  {
+    id: 'lofi',
+    label: 'Lo-Fi',
+    category: 'Beats',
+    description: 'Warm ambient pad, soft vinyl hiss & gentle tape wobble',
+  },
+  {
+    id: 'lofichill',
+    label: 'Lo-Fi Chill',
+    category: 'Beats',
+    description: '72 BPM swung beat, Rhodes chords & vinyl crackle',
+  },
+  // Brainwaves
+  {
+    id: 'alphawaves',
+    label: 'Alpha Waves',
+    category: 'Brainwaves',
+    description: '10 Hz binaural tone (200 Hz L / 210 Hz R)',
+    note: 'Use headphones',
+  },
+] as const;
+
+export const PREVIEW_DURATION_MS = 3000;
+
+export const UNCHANGED_BUILT_IN_SOUNDS: readonly BuiltInTrackId[] = [
+  'rain',
+  'whitenoise',
+  'pinknoise',
+  'brownnoise',
+  'alphawaves',
+] as const;
+
+export const REWRITTEN_SOUND_SYNTH_SPECS = {
+  ocean: {
+    surfLowpassHz: 500,
+    waveCycleMinSec: 7,
+    waveCycleMaxSec: 12,
+    riseMinSec: 3,
+    riseMaxSec: 5,
+    fallMinSec: 3,
+    fallMaxSec: 5,
+    foamHighpassHz: 2200,
+  },
+  thunderstorm: {
+    rainLowpassHz: 1000,
+    rainRelativeGain: 0.38,
+    thunderIntervalMinSec: 8,
+    thunderIntervalMaxSec: 25,
+    crackDurationSec: 0.08,
+    crackHighpassHz: 1800,
+    rumbleLowpassMinHz: 120,
+    rumbleLowpassMaxHz: 200,
+    rumbleAttackSec: 0.4,
+    rumbleDecayMinSec: 4,
+    rumbleDecayMaxSec: 7,
+    rumbleWobbleMinHz: 1.4,
+    rumbleWobbleMaxHz: 2.8,
+  },
+  fireplace: {
+    bedLowpassHz: 250,
+    crackleDurationMinSec: 0.005,
+    crackleDurationMaxSec: 0.03,
+    crackleBandpassMinHz: 1000,
+    crackleBandpassMaxHz: 5000,
+    crackleRateMinPerSec: 4,
+    crackleRateMaxPerSec: 20,
+  },
+  birds: {
+    windBandpassHz: 580,
+    chirpFreqMinHz: 2000,
+    chirpFreqMaxHz: 6000,
+    notesMin: 2,
+    notesMax: 6,
+    speciesCount: 3,
+    callIntervalMinSec: 2,
+    callIntervalMaxSec: 9,
+  },
+  crickets: {
+    carrierFreqMinHz: 4200,
+    carrierFreqMaxHz: 5000,
+    pulseRateHz: 30,
+    pulsesPerChirp: 3,
+    chirpsPerSecond: 2,
+    cricketVoicesCount: 5,
+    cricketVoicesMin: 4,
+    cricketVoicesMax: 6,
+  },
+  lofi: {
+    hasDrums: false,
+    padLowpassHz: 720,
+    tapeWobbleHz: 0.45,
+    oscillatorTypes: ['sawtooth', 'sine'] as const,
+  },
+  lofichill: {
+    hasDrums: true,
+    bpm: 72,
+    barsPerChord: 2,
+    beatsPerBar: 4,
+    swingRatio: 0.58,
+    rhodesLowpassHz: 3000,
+    tapeWobbleHz: 0.55,
+    chordNames: ['Cmaj7', 'Am7', 'Fmaj7', 'G7'] as const,
+    chords: [
+      [261.63, 329.63, 392.0, 493.88], // Cmaj7
+      [220.0, 261.63, 329.63, 392.0], // Am7
+      [174.61, 220.0, 261.63, 349.23], // Fmaj7
+      [196.0, 246.94, 293.66, 349.23], // G7
+    ] as const,
+  },
+} as const;
+
+export type CuratedTrackErrorCategory =
+  | 'blocked link'
+  | 'not an audio file'
+  | 'network error';
+
+/**
+ * Classifies an HTMLAudioElement / stream failure into a specific user-facing reason:
+ * - "blocked link"
+ * - "not an audio file"
+ * - "network error"
+ */
+export function classifyCuratedTrackError(params: {
+  mediaErrorCode?: number | null;
+  src?: string;
+  errorMessage?: string;
+}): { category: CuratedTrackErrorCategory; message: string } {
+  const code = params.mediaErrorCode ?? null;
+  const rawSrc = (params.src || '').trim().toLowerCase();
+  const errMsg = (params.errorMessage || '').trim().toLowerCase();
+
+  // 1. Network error (MEDIA_ERR_NETWORK === 2 or network/fetch/offline error message)
+  if (
+    code === 2 ||
+    errMsg.includes('network') ||
+    errMsg.includes('offline') ||
+    errMsg.includes('failed to fetch') ||
+    errMsg.includes('timeout')
+  ) {
+    return {
+      category: 'network error',
+      message: 'Network error — could not reach the audio server.',
+    };
+  }
+
+  // Check if URL clearly looks like an HTML page or non-audio document
+  const cleanPath = rawSrc.split('?')[0].split('#')[0];
+  const hasWebpageExt = /\.(html|htm|php|asp|aspx|jsp|json|xml|txt|pdf|jpg|png|gif)$/i.test(
+    cleanPath
+  );
+  const hasAudioExt = /\.(mp3|wav|ogg|m4a|aac|flac|opus|weba|webm)$/i.test(
+    cleanPath
+  );
+
+  // 2. Not an audio file (MEDIA_ERR_DECODE === 3, or webpage extension, or decode/mime error)
+  if (
+    code === 3 ||
+    hasWebpageExt ||
+    errMsg.includes('decode') ||
+    errMsg.includes('not an audio') ||
+    errMsg.includes('mime') ||
+    errMsg.includes('corrupt')
+  ) {
+    return {
+      category: 'not an audio file',
+      message:
+        'Not an audio file — link points to a webpage or unsupported format.',
+    };
+  }
+
+  // 3. MEDIA_ERR_SRC_NOT_SUPPORTED === 4
+  if (code === 4) {
+    if (!hasAudioExt && cleanPath.length > 0) {
+      return {
+        category: 'not an audio file',
+        message:
+          'Not an audio file — URL does not point to a direct .mp3, .wav, .ogg, or .m4a stream.',
+      };
+    }
+    return {
+      category: 'blocked link',
+      message:
+        'Blocked link — access denied (403/404 or CORS hotlink restriction).',
+    };
+  }
+
+  // Default fallback
+  if (errMsg.includes('notallowed') || errMsg.includes('blocked') || errMsg.includes('403') || errMsg.includes('cors')) {
+    return {
+      category: 'blocked link',
+      message: 'Blocked link — playback blocked by remote host or CORS policy.',
+    };
+  }
+
+  return {
+    category: 'blocked link',
+    message: 'Blocked link — remote audio stream is blocked or unreachable.',
+  };
+}
+
+export const MAX_CUSTOM_AUDIO_FILE_BYTES = 20 * 1024 * 1024; // 20 MB
+
+export const ALLOWED_AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.m4a'] as const;
+
+export const ALLOWED_AUDIO_MIME_PREFIXES = [
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/wav',
+  'audio/x-wav',
+  'audio/wave',
+  'audio/ogg',
+  'audio/vorbis',
+  'audio/mp4',
+  'audio/x-m4a',
+  'audio/m4a',
+  'audio/aac',
+] as const;
+
+/**
+ * Validates an uploaded audio file for My Music:
+ * - Format must be mp3, wav, ogg, or m4a
+ * - File size must be > 0 and <= 20 MB (20,971,520 bytes)
+ */
+export function validateCustomAudioFile(file: {
+  name: string;
+  size: number;
+  type?: string;
+}): { valid: boolean; error?: string } {
+  if (!file || typeof file.name !== 'string') {
+    return { valid: false, error: 'Please select a valid audio file.' };
+  }
+  const lowerName = file.name.trim().toLowerCase();
+  const hasAllowedExt = ALLOWED_AUDIO_EXTENSIONS.some((ext) =>
+    lowerName.endsWith(ext)
+  );
+  const lowerMime = (file.type || '').trim().toLowerCase();
+  const hasAllowedMime =
+    lowerMime.length === 0 ||
+    ALLOWED_AUDIO_MIME_PREFIXES.some((prefix) => lowerMime.startsWith(prefix));
+
+  if (!hasAllowedExt || !hasAllowedMime) {
+    return {
+      valid: false,
+      error:
+        'Unsupported audio format. Please upload an .mp3, .wav, .ogg, or .m4a file.',
+    };
+  }
+
+  if (typeof file.size !== 'number' || Number.isNaN(file.size) || file.size <= 0) {
+    return {
+      valid: false,
+      error: 'The selected audio file is empty or unreadable.',
+    };
+  }
+
+  if (file.size > MAX_CUSTOM_AUDIO_FILE_BYTES) {
+    const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+    return {
+      valid: false,
+      error: `File is too large (${sizeMb} MB). Maximum allowed size is 20 MB per file.`,
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validates a Study Room `vibe` identifier.
+ * Only built-in sounds (`builtin:<id>`) or Cloud Curated Tracks (`track:<id>`) or empty string `""` are allowed.
+ * Custom uploaded files (`custom:...` or `my:...`) are strictly rejected so private files are never shared.
+ * Must be a short string (max 100 chars).
+ */
+export function sanitizeRoomVibe(rawVibe: unknown): string {
+  if (typeof rawVibe !== 'string') return '';
+  const cleaned = sanitizePlainText(rawVibe, 100);
+  if (!cleaned) return '';
+  if (cleaned.startsWith('builtin:')) {
+    const trackId = cleaned.slice('builtin:'.length) as BuiltInTrackId;
+    const exists = BUILT_IN_SOUNDS.some((s) => s.id === trackId);
+    return exists ? `builtin:${trackId}` : '';
+  }
+  if (cleaned.startsWith('track:')) {
+    const idPart = cleaned
+      .slice('track:'.length)
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+      .slice(0, 80);
+    return idPart ? `track:${idPart}` : '';
+  }
+  return '';
+}
+
+export interface PersistedMixerPreferences {
+  masterVolume: number;
+  layerVolumes: Record<string, number>;
+  activeLayerIds: string[];
+  autoSuggestByMood: boolean;
+}
+
+export function normalizePersistedMixerPreferences(
+  raw: unknown
+): PersistedMixerPreferences {
+  const fallback: PersistedMixerPreferences = {
+    masterVolume: 0.75,
+    layerVolumes: {},
+    activeLayerIds: [],
+    autoSuggestByMood: true,
+  };
+  if (!raw || typeof raw !== 'object') return fallback;
+  const obj = raw as Record<string, unknown>;
+  const masterVolume =
+    typeof obj.masterVolume === 'number' && !Number.isNaN(obj.masterVolume)
+      ? Math.max(0, Math.min(1, obj.masterVolume))
+      : 0.75;
+
+  const layerVolumes: Record<string, number> = {};
+  if (obj.layerVolumes && typeof obj.layerVolumes === 'object') {
+    for (const [k, v] of Object.entries(
+      obj.layerVolumes as Record<string, unknown>
+    )) {
+      if (typeof v === 'number' && !Number.isNaN(v)) {
+        layerVolumes[k.slice(0, 120)] = Math.max(0, Math.min(1, v));
+      }
+    }
+  }
+
+  const activeLayerIds: string[] = [];
+  if (Array.isArray(obj.activeLayerIds)) {
+    for (const item of obj.activeLayerIds) {
+      if (typeof item === 'string' && item.trim().length > 0) {
+        activeLayerIds.push(item.trim().slice(0, 120));
+      }
+    }
+  }
+
+  const autoSuggestByMood =
+    typeof obj.autoSuggestByMood === 'boolean' ? obj.autoSuggestByMood : true;
+
+  return {
+    masterVolume,
+    layerVolumes,
+    activeLayerIds: Array.from(new Set(activeLayerIds)).slice(0, 16),
+    autoSuggestByMood,
+  };
+}
+
+// ============================================================================
+// Friend Stats & 14-Day Public dailyMinutes Helpers (Privacy-Safe)
+// ============================================================================
+
+export const MAX_DAILY_MINUTES_ENTRIES = 14;
+export const MAX_DAILY_MINUTES_VALUE = 1440;
+
+/**
+ * Sanitizes and trims a `dailyMinutes` map to at most 14 entries (last 14 days relative to `todayKey`),
+ * ensuring every date key is `YYYY-MM-DD` and every value is an integer from 0 to 1440.
+ */
+export function sanitizeAndTrimDailyMinutes(
+  rawMap: Record<string, number> | undefined | null,
+  todayKey: string,
+  maxEntries: number = MAX_DAILY_MINUTES_ENTRIES
+): Record<string, number> {
+  if (!rawMap || typeof rawMap !== 'object') {
+    return {};
+  }
+
+  const cutoffDateKey = addDays(todayKey, -(Math.max(1, maxEntries) - 1));
+  const validEntries: Array<[string, number]> = [];
+
+  for (const [key, rawVal] of Object.entries(rawMap)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+    if (key < cutoffDateKey || key > todayKey) continue;
+    const numVal = Number(rawVal);
+    if (!Number.isFinite(numVal)) continue;
+    const clamped = Math.max(
+      0,
+      Math.min(MAX_DAILY_MINUTES_VALUE, Math.floor(numVal))
+    );
+    validEntries.push([key, clamped]);
+  }
+
+  // Sort ascending by date key and keep at most `maxEntries` most recent entries
+  validEntries.sort((a, b) => a[0].localeCompare(b[0]));
+  const trimmed = validEntries.slice(-Math.max(1, maxEntries));
+
+  const result: Record<string, number> = {};
+  for (const [k, v] of trimmed) {
+    result[k] = v;
+  }
+  return result;
+}
+
+/**
+ * Updates `dailyMinutes` when a focus session completes, clamping values to 0..1440
+ * and trimming the map to the last 14 days (at most 14 entries).
+ */
+export function updateDailyMinutesOnSessionComplete(
+  existingMap: Record<string, number> | undefined | null,
+  sessionDateKey: string,
+  addedMinutes: number,
+  todayKey: string
+): Record<string, number> {
+  const base = sanitizeAndTrimDailyMinutes(existingMap, todayKey);
+  const safeAdded = Math.max(0, Math.floor(Number(addedMinutes) || 0));
+  if (/^\d{4}-\d{2}-\d{2}$/.test(sessionDateKey)) {
+    const prev = base[sessionDateKey] ?? 0;
+    base[sessionDateKey] = Math.max(
+      0,
+      Math.min(MAX_DAILY_MINUTES_VALUE, prev + safeAdded)
+    );
+  }
+  return sanitizeAndTrimDailyMinutes(base, todayKey);
+}
+
+/**
+ * Builds a 14-day `dailyMinutes` map from completed focus sessions, trimmed to the last 14 days
+ * and clamped to 0..1440 per day.
+ */
+export function buildDailyMinutesFromSessions(
+  sessions: FocusSessionRecord[],
+  todayKey: string
+): Record<string, number> {
+  const raw: Record<string, number> = {};
+  const cutoffDateKey = addDays(todayKey, -(MAX_DAILY_MINUTES_ENTRIES - 1));
+
+  for (const s of sessions) {
+    if (!s.completed || s.mode !== 'focus' || s.durationMinutes <= 0) continue;
+    const dKey = (s.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dKey)) continue;
+    if (dKey < cutoffDateKey || dKey > todayKey) continue;
+    raw[dKey] = Math.min(
+      MAX_DAILY_MINUTES_VALUE,
+      (raw[dKey] ?? 0) + Math.floor(s.durationMinutes)
+    );
+  }
+
+  return sanitizeAndTrimDailyMinutes(raw, todayKey);
+}
+
+/**
+ * Returns today's studied minutes for a user from their `dailyMinutes` map (0..1440).
+ */
+export function getTodayMinutesForUser(
+  user: { dailyMinutes?: Record<string, number> },
+  todayKey: string
+): number {
+  const raw = user.dailyMinutes?.[todayKey] ?? 0;
+  if (!Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.min(MAX_DAILY_MINUTES_VALUE, Math.floor(raw)));
+}
+
+/**
+ * Returns today's studied hours (rounded to 1 decimal place) for a user from their `dailyMinutes` map.
+ */
+export function getTodayHoursForUser(
+  user: { dailyMinutes?: Record<string, number> },
+  todayKey: string
+): number {
+  return Number((getTodayMinutesForUser(user, todayKey) / 60).toFixed(1));
+}
+
+export interface SevenDayBarPoint {
+  date: string;
+  label: string;
+  minutes: number;
+  hours: number;
+}
+
+/**
+ * Builds a 7-day bar chart array (last 7 days ending on `todayKey`) from a `dailyMinutes` map.
+ */
+export function buildSevenDayChartFromDailyMinutes(
+  dailyMinutes: Record<string, number> | undefined | null,
+  todayKey: string
+): SevenDayBarPoint[] {
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const chart: SevenDayBarPoint[] = [];
+
+  for (let i = 6; i >= 0; i--) {
+    const dKey = addDays(todayKey, -i);
+    const [y, m, d] = dKey.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    const rawMins = dailyMinutes?.[dKey] ?? 0;
+    const mins = Number.isFinite(rawMins)
+      ? Math.max(0, Math.min(MAX_DAILY_MINUTES_VALUE, Math.floor(rawMins)))
+      : 0;
+    chart.push({
+      date: dKey,
+      label: dayNames[dt.getDay()],
+      minutes: mins,
+      hours: Number((mins / 60).toFixed(1)),
+    });
+  }
+
+  return chart;
+}
+
+export interface PublicFriendProfileView {
+  uid: string;
+  displayName: string;
+  username: string;
+  photoURL: string;
+  level: number;
+  levelTitle: LevelTitle;
+  currentStreak: number;
+  shareStatsWithFriends: boolean;
+  isStatsHiddenFromViewer: boolean;
+  // Detailed fields (null/empty when hidden from viewer due to shareStatsWithFriends === false)
+  xp: number | null;
+  currentLevelXp: number | null;
+  xpNeededForNextLevel: number | null;
+  xpProgressPercent: number | null;
+  longestStreak: number | null;
+  minutesToday: number | null;
+  hoursToday: number | null;
+  minutesThisWeek: number | null;
+  hoursThisWeek: number | null;
+  minutesAllTime: number | null;
+  hoursAllTime: number | null;
+  studyingNow: boolean | null;
+  sevenDayChart: SevenDayBarPoint[];
+}
+
+/**
+ * Resolves the privacy-safe profile view for a friend or for the current user (`isSelf = true`).
+ * - Never includes task names, subjects, or session history.
+ * - When `shareStatsWithFriends === false` and `!isSelf`, friends see ONLY name, level, and currentStreak.
+ */
+export function resolvePublicFriendProfileStats(
+  user: CloudUserDoc,
+  todayKey: string,
+  currentWeekKey: string,
+  isSelf: boolean = false
+): PublicFriendProfileView {
+  const shareStats = user.shareStatsWithFriends !== false;
+  const isHidden = !isSelf && !shareStats;
+  const levelInfo = getLevelInfo(user.xp);
+
+  if (isHidden) {
+    return {
+      uid: user.uid,
+      displayName: user.displayName,
+      username: user.username,
+      photoURL: user.photoURL,
+      level: user.level,
+      levelTitle: getLevelTitle(user.level),
+      currentStreak: user.currentStreak,
+      shareStatsWithFriends: false,
+      isStatsHiddenFromViewer: true,
+      xp: null,
+      currentLevelXp: null,
+      xpNeededForNextLevel: null,
+      xpProgressPercent: null,
+      longestStreak: null,
+      minutesToday: null,
+      hoursToday: null,
+      minutesThisWeek: null,
+      hoursThisWeek: null,
+      minutesAllTime: null,
+      hoursAllTime: null,
+      studyingNow: null,
+      sevenDayChart: [],
+    };
+  }
+
+  const normWeek = normalizeWeeklyMinutes(
+    user.weeklyMinutes,
+    user.weekKey,
+    currentWeekKey
+  );
+  const minutesToday = getTodayMinutesForUser(user, todayKey);
+  const minutesThisWeek = normWeek.weeklyMinutes;
+  const minutesAllTime = Math.max(
+    0,
+    Math.floor(user.totalMinutes || 0),
+    minutesThisWeek,
+    minutesToday
+  );
+
+  return {
+    uid: user.uid,
+    displayName: user.displayName,
+    username: user.username,
+    photoURL: user.photoURL,
+    level: user.level,
+    levelTitle: levelInfo.title,
+    currentStreak: user.currentStreak,
+    shareStatsWithFriends: shareStats,
+    isStatsHiddenFromViewer: false,
+    xp: user.xp,
+    currentLevelXp: levelInfo.currentLevelXp,
+    xpNeededForNextLevel: levelInfo.xpNeededForNextLevel,
+    xpProgressPercent: levelInfo.progressPercent,
+    longestStreak: Math.max(user.longestStreak, user.currentStreak),
+    minutesToday,
+    hoursToday: Number((minutesToday / 60).toFixed(1)),
+    minutesThisWeek,
+    hoursThisWeek: Number((minutesThisWeek / 60).toFixed(1)),
+    minutesAllTime,
+    hoursAllTime: Number((minutesAllTime / 60).toFixed(1)),
+    studyingNow: Boolean(user.studyingNow),
+    sevenDayChart: buildSevenDayChartFromDailyMinutes(
+      user.dailyMinutes,
+      todayKey
+    ),
+  };
+}
+
+
 
 

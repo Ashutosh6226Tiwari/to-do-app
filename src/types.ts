@@ -9,7 +9,7 @@ export type NavSection =
   | 'settings'
   | 'admin';
 
-export type LeaderboardTab = 'weeklyHours' | 'streak' | 'allTimeXp';
+export type LeaderboardTab = 'today' | 'weeklyHours' | 'streak' | 'allTimeXp';
 
 export type CalendarViewMode = 'day' | 'week' | 'month';
 
@@ -29,6 +29,8 @@ export interface CloudUserDoc {
   totalMinutes: number;
   weeklyMinutes: number;
   weekKey: string; // e.g. "2026-W44"
+  dailyMinutes?: Record<string, number>; // Last 14 days (YYYY-MM-DD -> integer 0..1440)
+  shareStatsWithFriends?: boolean; // Default true; when false, friends see only name, level, and streak
   studyingNow: boolean;
   role: 'user' | 'admin';
   createdAt: string;
@@ -62,6 +64,7 @@ export interface StudyRoomDoc {
   focusMinutes?: number;
   shortBreakMinutes?: number;
   longBreakMinutes?: number;
+  vibe?: string;
   status: 'idle' | 'running' | 'paused' | 'completed';
   createdAt?: string;
 }
@@ -79,6 +82,19 @@ export interface CloudAudioTrack {
   title: string;
   category: string;
   url: string;
+  createdAt: string;
+}
+
+export interface MyMusicTrack {
+  id: string;
+  name: string;
+  moodTag: MoodThemeId;
+  sourceType: 'file' | 'link';
+  url?: string;
+  fileName?: string;
+  mimeType?: string;
+  fileSize?: number;
+  loop: boolean;
   createdAt: string;
 }
 
@@ -143,6 +159,7 @@ export interface UserProfile {
   totalXp: number;
   theme: MoodThemeId;
   timerSettings: TimerSettings;
+  shareStatsWithFriends?: boolean;
 }
 
 export interface MoodThemeConfig {

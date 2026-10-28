@@ -9,7 +9,6 @@ import {
 } from 'firebase/firestore';
 import {
   BarChart3,
-  BookOpen,
   Calendar,
   DoorOpen,
   KeyRound,
@@ -40,6 +39,8 @@ import {
   UserProfile,
 } from './types';
 import {
+  addDays,
+  buildDailyMinutesFromSessions,
   calculateSessionXP,
   clampRoomCustomMinutes,
   CompletedSessionOutcome,
@@ -110,6 +111,13 @@ import {
   GoogleSignInScreen,
   UsernameClaimModal,
 } from './components/AuthGateModal';
+import {
+  APP_FULL_TITLE,
+  APP_NAME,
+  buildLumoFaviconDataUri,
+  LumoLogo,
+  MadeByAshuWatermark,
+} from './components/LumoLogo';
 
 const STORAGE_KEYS = {
   PROFILE: 'focusflow_profile_v1',
@@ -127,7 +135,10 @@ const MODE_LABELS: Record<TimerMode, string> = {
   longBreak: 'Long Break',
 };
 
-function getInitialDemoFriendsList(currentWeekKey: string): CloudUserDoc[] {
+function getInitialDemoFriendsList(
+  currentWeekKey: string,
+  todayKey: string
+): CloudUserDoc[] {
   return [
     {
       uid: 'demo-friend-1',
@@ -141,6 +152,18 @@ function getInitialDemoFriendsList(currentWeekKey: string): CloudUserDoc[] {
       totalMinutes: 640,
       weeklyMinutes: 260,
       weekKey: currentWeekKey,
+      dailyMinutes: {
+        [todayKey]: 90,
+        [addDays(todayKey, -1)]: 50,
+        [addDays(todayKey, -2)]: 60,
+        [addDays(todayKey, -3)]: 35,
+        [addDays(todayKey, -4)]: 25,
+        [addDays(todayKey, -5)]: 50,
+        [addDays(todayKey, -6)]: 45,
+        [addDays(todayKey, -8)]: 60,
+        [addDays(todayKey, -10)]: 50,
+      },
+      shareStatsWithFriends: true,
       studyingNow: true,
       role: 'user',
       createdAt: '2026-10-01T10:00:00.000Z',
@@ -157,6 +180,16 @@ function getInitialDemoFriendsList(currentWeekKey: string): CloudUserDoc[] {
       totalMinutes: 480,
       weeklyMinutes: 195,
       weekKey: currentWeekKey,
+      dailyMinutes: {
+        [todayKey]: 60,
+        [addDays(todayKey, -1)]: 45,
+        [addDays(todayKey, -2)]: 40,
+        [addDays(todayKey, -3)]: 50,
+        [addDays(todayKey, -5)]: 35,
+        [addDays(todayKey, -6)]: 30,
+        [addDays(todayKey, -9)]: 50,
+      },
+      shareStatsWithFriends: true,
       studyingNow: false,
       role: 'user',
       createdAt: '2026-10-03T14:00:00.000Z',
@@ -279,7 +312,7 @@ export default function App() {
   const [cloudUserDoc, setCloudUserDoc] = useState<CloudUserDoc | null>(null);
   const [isDailyGoalModalOpen, setIsDailyGoalModalOpen] = useState(false);
   const [friends, setFriends] = useState<CloudUserDoc[]>(() =>
-    getInitialDemoFriendsList(currentWeekKey)
+    getInitialDemoFriendsList(currentWeekKey, todayKey)
   );
   const [friendships, setFriendships] = useState<FriendshipItem[]>([]);
   const [incomingRequests, setIncomingRequests] = useState<FriendRequestItem[]>(
@@ -334,6 +367,23 @@ export default function App() {
     return new Set<string>();
   })());
 
+  const localDailyMinutes = useMemo(
+    () => buildDailyMinutesFromSessions(sessions, todayKey),
+    [sessions, todayKey]
+  );
+
+  const localTotalMinutes = useMemo(
+    () =>
+      sessions.reduce(
+        (acc, s) =>
+          s.completed && s.mode === 'focus' && s.durationMinutes > 0
+            ? acc + Math.floor(s.durationMinutes)
+            : acc,
+        0
+      ),
+    [sessions]
+  );
+
   // Effective current user object (Cloud user doc when signed in, or local profile representation)
   const effectiveUserDoc: CloudUserDoc = useMemo(() => {
     if (cloudUserDoc) {
@@ -346,6 +396,15 @@ export default function App() {
         ...cloudUserDoc,
         weeklyMinutes: norm.weeklyMinutes,
         weekKey: norm.weekKey,
+        dailyMinutes:
+          cloudUserDoc.dailyMinutes &&
+          Object.keys(cloudUserDoc.dailyMinutes).length > 0
+            ? cloudUserDoc.dailyMinutes
+            : localDailyMinutes,
+        shareStatsWithFriends:
+          profile.shareStatsWithFriends !== undefined
+            ? profile.shareStatsWithFriends
+            : cloudUserDoc.shareStatsWithFriends !== false,
         studyingNow: timerState.isRunning && timerState.mode === 'focus',
       };
     }
@@ -358,9 +417,11 @@ export default function App() {
       level: getLevelInfo(profile.totalXp).level,
       currentStreak: stats.currentStreak,
       longestStreak: stats.longestStreak,
-      totalMinutes: stats.minutesThisMonth,
+      totalMinutes: Math.max(localTotalMinutes, stats.minutesThisMonth),
       weeklyMinutes: stats.minutesThisWeek,
       weekKey: currentWeekKey,
+      dailyMinutes: localDailyMinutes,
+      shareStatsWithFriends: profile.shareStatsWithFriends !== false,
       studyingNow: timerState.isRunning && timerState.mode === 'focus',
       role: 'user',
       createdAt: '2026-10-01T08:00:00.000Z',
@@ -369,7 +430,10 @@ export default function App() {
     cloudUserDoc,
     currentWeekKey,
     firebaseUser,
+    localDailyMinutes,
+    localTotalMinutes,
     profile.name,
+    profile.shareStatsWithFriends,
     profile.totalXp,
     stats.currentStreak,
     stats.longestStreak,
@@ -456,6 +520,7 @@ export default function App() {
           settings?: TimerSettings;
           theme?: MoodThemeId;
           dailyGoalHours?: number;
+          shareStatsWithFriends?: boolean;
         };
         if (Array.isArray(data.tasks)) {
           setTasks(data.tasks);
@@ -463,7 +528,8 @@ export default function App() {
         if (
           data.settings ||
           data.theme ||
-          typeof data.dailyGoalHours === 'number'
+          typeof data.dailyGoalHours === 'number' ||
+          typeof data.shareStatsWithFriends === 'boolean'
         ) {
           setProfile((prev) => ({
             ...prev,
@@ -473,6 +539,10 @@ export default function App() {
               typeof data.dailyGoalHours === 'number'
                 ? Math.max(0, Math.min(16, data.dailyGoalHours))
                 : prev.dailyGoalHours,
+            shareStatsWithFriends:
+              typeof data.shareStatsWithFriends === 'boolean'
+                ? data.shareStatsWithFriends
+                : prev.shareStatsWithFriends,
           }));
         }
       },
@@ -790,6 +860,7 @@ export default function App() {
         void updateCloudUserProgress(cloudUserDoc, {
           xpDelta: xpEarned,
           addedMinutes: outcome.durationMinutes,
+          sessionDateKey: todayKey,
           currentStreak: nextStreak,
           longestStreak: Math.max(stats.longestStreak, nextStreak),
           studyingNow: false,
@@ -879,9 +950,9 @@ export default function App() {
     const selectedTask = tasks.find((t) => t.id === timerState.selectedTaskId);
     const taskPart = selectedTask ? ` · ${selectedTask.title}` : '';
     if (timerState.isRunning) {
-      document.title = `(${formatted}) ${MODE_LABELS[timerState.mode]}${taskPart} — FocusFlow`;
+      document.title = `(${formatted}) ${MODE_LABELS[timerState.mode]}${taskPart} — ${APP_NAME}`;
     } else {
-      document.title = `${formatted} · FocusFlow — Student Study Planner & Pomodoro`;
+      document.title = `${formatted} · ${APP_FULL_TITLE}`;
     }
   }, [
     remainingSeconds,
@@ -890,6 +961,19 @@ export default function App() {
     timerState.selectedTaskId,
     tasks,
   ]);
+
+  // Keep browser favicon synced with the Lumo SVG logo in the active mood theme accent color
+  useEffect(() => {
+    const faviconUri = buildLumoFaviconDataUri(themeConfig.accentHex);
+    let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      link.type = 'image/svg+xml';
+      document.head.appendChild(link);
+    }
+    link.href = faviconUri;
+  }, [themeConfig.accentHex]);
 
   // Auth Handlers
   const handleGoogleSignIn = async () => {
@@ -1227,6 +1311,14 @@ export default function App() {
         totalMinutes: 510,
         weeklyMinutes: 215,
         weekKey: currentWeekKey,
+        dailyMinutes: {
+          [todayKey]: 45,
+          [addDays(todayKey, -1)]: 50,
+          [addDays(todayKey, -2)]: 40,
+          [addDays(todayKey, -3)]: 30,
+          [addDays(todayKey, -4)]: 50,
+        },
+        shareStatsWithFriends: true,
         studyingNow: true,
         role: 'user',
         createdAt: '2026-10-05T12:00:00.000Z',
@@ -1243,6 +1335,15 @@ export default function App() {
         totalMinutes: 890,
         weeklyMinutes: 310,
         weekKey: currentWeekKey,
+        dailyMinutes: {
+          [todayKey]: 75,
+          [addDays(todayKey, -1)]: 60,
+          [addDays(todayKey, -2)]: 50,
+          [addDays(todayKey, -3)]: 45,
+          [addDays(todayKey, -4)]: 40,
+          [addDays(todayKey, -5)]: 40,
+        },
+        shareStatsWithFriends: true,
         studyingNow: false,
         role: 'user',
         createdAt: '2026-10-02T12:00:00.000Z',
@@ -1291,6 +1392,14 @@ export default function App() {
         totalMinutes: 510,
         weeklyMinutes: 215,
         weekKey: currentWeekKey,
+        dailyMinutes: {
+          [todayKey]: 45,
+          [addDays(todayKey, -1)]: 50,
+          [addDays(todayKey, -2)]: 40,
+          [addDays(todayKey, -3)]: 30,
+          [addDays(todayKey, -4)]: 50,
+        },
+        shareStatsWithFriends: true,
         studyingNow: true,
         role: 'user',
         createdAt: new Date().toISOString(),
@@ -1368,6 +1477,7 @@ export default function App() {
       focusMinutes,
       shortBreakMinutes,
       longBreakMinutes,
+      vibe: 'builtin:lofichill',
       status: 'idle',
       createdAt: new Date().toISOString(),
     });
@@ -1400,6 +1510,7 @@ export default function App() {
       focusMinutes: 25,
       shortBreakMinutes: 5,
       longBreakMinutes: 15,
+      vibe: 'builtin:lofichill',
       status: 'running',
       createdAt: new Date().toISOString(),
     });
@@ -1441,6 +1552,7 @@ export default function App() {
     focusMinutes?: number;
     shortBreakMinutes?: number;
     longBreakMinutes?: number;
+    vibe?: string;
     status?: 'idle' | 'running' | 'paused' | 'completed';
   }) => {
     if (!activeRoom) return;
@@ -1623,11 +1735,17 @@ export default function App() {
         <div
           className={`relative z-20 p-8 rounded-3xl flex flex-col items-center gap-3 ${themeConfig.glassCardClass}`}
         >
+          <LumoLogo
+            themeConfig={themeConfig}
+            variant="icon"
+            size="lg"
+            dataTestId="loading-brand-logo"
+          />
           <Loader2
-            className="w-8 h-8 animate-spin"
+            className="w-6 h-6 animate-spin"
             style={{ color: themeConfig.accentHex }}
           />
-          <p className="text-sm font-semibold">Loading FocusFlow Cloud...</p>
+          <p className="text-sm font-semibold">Loading {APP_NAME} Cloud...</p>
         </div>
       </div>
     );
@@ -1701,20 +1819,12 @@ export default function App() {
       >
         {/* Brand Wordmark */}
         <div className="flex items-center justify-between gap-2 px-2 py-2 mb-6">
-          <div className="flex items-center gap-2.5">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-sm shrink-0"
-              style={{ backgroundColor: themeConfig.accentHex }}
-            >
-              <BookOpen className="w-5 h-5" />
-            </div>
-            <span
-              className={`text-xl font-bold tracking-tight whitespace-nowrap ${themeConfig.textPrimaryClass}`}
-              style={{ fontFamily: themeConfig.fontDisplay }}
-            >
-              FocusFlow
-            </span>
-          </div>
+          <LumoLogo
+            themeConfig={themeConfig}
+            variant="wide"
+            size="md"
+            dataTestId="sidebar-brand-logo"
+          />
         </div>
 
         {/* Navigation Links */}
@@ -1818,6 +1928,14 @@ export default function App() {
               </button>
             </div>
           )}
+
+          {/* Subtle desktop sidebar credit watermark */}
+          <div className={`pt-2 border-t ${themeConfig.borderClass} flex justify-center`}>
+            <MadeByAshuWatermark
+              themeConfig={themeConfig}
+              dataTestId="sidebar-watermark"
+            />
+          </div>
         </div>
       </aside>
 
@@ -1884,6 +2002,7 @@ export default function App() {
               outgoingRequests={outgoingRequests}
               themeConfig={themeConfig}
               isCloudConnected={Boolean(firebaseUser && !needsUsernameClaim)}
+              todayKey={todayKey}
               onSearchUsername={handleSearchUsername}
               onSendFriendRequest={handleSendFriendRequest}
               onRespondRequest={handleRespondFriendRequest}
@@ -1897,6 +2016,7 @@ export default function App() {
               activeRoom={activeRoom}
               roomMembers={roomMembers}
               themeConfig={themeConfig}
+              customTracks={customTracks}
               onCreateRoom={handleCreateRoom}
               onJoinRoom={handleJoinRoom}
               onLeaveRoom={handleLeaveRoom}
@@ -1929,6 +2049,13 @@ export default function App() {
                 };
                 setProfile(safeNextProfile);
                 syncTasksAndProfileIfNeeded(tasks, safeNextProfile);
+                if (cloudUserDoc && firebaseUser && !needsUsernameClaim) {
+                  void updateCloudUserProgress(cloudUserDoc, {
+                    displayName: safeNextProfile.name,
+                    shareStatsWithFriends:
+                      safeNextProfile.shareStatsWithFriends !== false,
+                  });
+                }
                 if (!timerState.isRunning) {
                   const nextMs = getModeDurationMs(
                     timerState.mode,

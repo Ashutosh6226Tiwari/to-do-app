@@ -33,7 +33,38 @@ service cloud.firestore {
 
     // ===============================================================
     // 1. users/{uid}
+    // - Do NOT store email in users/{uid}; keep only public fields
+    // - Allow get by uid for signed-in users, but DENY list so nobody can enumerate profiles
+    // - First migration allows starting xp up to 100000; afterwards max +500 XP per write
+    // - Sanity limits: currentStreak (0..3650), weeklyMinutes (0..10080), level must not drop
+    // - dailyMinutes: optional map of at most 14 entries where every value is an int from 0 to 1440
+    // - shareStatsWithFriends: optional bool (default true)
+    // - Role is 'user' on creation and immutable by client writes (changed only in Firebase Console)
     // ===============================================================
+    function isValidDailyMinuteEntry(vals, idx) {
+      return vals.size() <= idx || (vals[idx] is int && vals[idx] >= 0 && vals[idx] <= 1440);
+    }
+
+    function isValidDailyMinutesMap(dm) {
+      let vals = dm.values();
+      return dm is map &&
+        dm.size() <= 14 &&
+        isValidDailyMinuteEntry(vals, 0) &&
+        isValidDailyMinuteEntry(vals, 1) &&
+        isValidDailyMinuteEntry(vals, 2) &&
+        isValidDailyMinuteEntry(vals, 3) &&
+        isValidDailyMinuteEntry(vals, 4) &&
+        isValidDailyMinuteEntry(vals, 5) &&
+        isValidDailyMinuteEntry(vals, 6) &&
+        isValidDailyMinuteEntry(vals, 7) &&
+        isValidDailyMinuteEntry(vals, 8) &&
+        isValidDailyMinuteEntry(vals, 9) &&
+        isValidDailyMinuteEntry(vals, 10) &&
+        isValidDailyMinuteEntry(vals, 11) &&
+        isValidDailyMinuteEntry(vals, 12) &&
+        isValidDailyMinuteEntry(vals, 13);
+    }
+
     function hasAllowedUserFieldsOnly(data) {
       return data.keys().hasAll([
         'displayName',
@@ -61,6 +92,8 @@ service cloud.firestore {
         'totalMinutes',
         'weeklyMinutes',
         'weekKey',
+        'dailyMinutes',
+        'shareStatsWithFriends',
         'studyingNow',
         'role',
         'createdAt'
@@ -80,21 +113,28 @@ service cloud.firestore {
         data.totalMinutes is int && data.totalMinutes >= 0 && data.totalMinutes <= 5256000 &&
         data.weeklyMinutes is int && data.weeklyMinutes >= 0 && data.weeklyMinutes <= 10080 &&
         data.weekKey is string && data.weekKey.size() >= 6 && data.weekKey.size() <= 12 &&
+        (!('dailyMinutes' in data) || isValidDailyMinutesMap(data.dailyMinutes)) &&
+        (!('shareStatsWithFriends' in data) || data.shareStatsWithFriends is bool) &&
         data.studyingNow is bool &&
         data.role in ['user', 'admin'] &&
         data.createdAt is string && data.createdAt.size() <= 40;
     }
 
     match /users/{uid} {
+      // Allow get by uid for signed-in users, but deny list to prevent profile enumeration
       allow get: if isSignedIn() && isValidId(uid);
       allow list: if false;
 
+      // First migration / creation: allow starting xp up to 100000, role must be 'user'
       allow create: if isOwner(uid) &&
         isValidId(uid) &&
         hasValidUserFieldTypesAndBounds(incoming()) &&
         incoming().role == 'user' &&
         incoming().xp <= 100000;
 
+      // Subsequent updates: role, username, and createdAt cannot change;
+      // XP can increase by at most 500 per write (and never decrease);
+      // level and longestStreak must not drop.
       allow update: if isOwner(uid) &&
         isValidId(uid) &&
         hasValidUserFieldTypesAndBounds(incoming()) &&
@@ -109,22 +149,26 @@ service cloud.firestore {
 
       allow delete: if false;
 
+      // Private user app state (tasks, timer settings, theme, dailyGoalHours, shareStatsWithFriends)
       match /private/{docId} {
         allow get, list: if isOwner(uid);
         allow create, update: if isOwner(uid) &&
           isValidId(docId) &&
           incoming().keys().hasAll(['tasks', 'settings', 'theme']) &&
-          incoming().keys().hasOnly(['tasks', 'settings', 'theme', 'dailyGoalHours']) &&
+          incoming().keys().hasOnly(['tasks', 'settings', 'theme', 'dailyGoalHours', 'shareStatsWithFriends']) &&
           incoming().tasks is list && incoming().tasks.size() <= 200 &&
           incoming().settings is map &&
           incoming().theme in ['calm', 'cozy', 'deep-focus', 'fresh', 'energetic'] &&
           (!('dailyGoalHours' in incoming()) ||
             ((incoming().dailyGoalHours is int || incoming().dailyGoalHours is float) &&
              incoming().dailyGoalHours >= 0 &&
-             incoming().dailyGoalHours <= 16));
+             incoming().dailyGoalHours <= 16)) &&
+          (!('shareStatsWithFriends' in incoming()) || incoming().shareStatsWithFriends is bool);
         allow delete: if isOwner(uid);
       }
 
+      // Completed focus session logs:
+      // minutes between 1 and 180, subject string under 100 chars, no extra fields
       function isValidSessionDoc(data) {
         return data.keys().hasAll(['minutes', 'subject', 'date', 'xpAwarded']) &&
           data.keys().hasOnly(['minutes', 'subject', 'date', 'xpAwarded']) &&
@@ -143,6 +187,10 @@ service cloud.firestore {
       }
     }
 
+    // ===============================================================
+    // 2. usernames/{usernameLower}
+    // - Enforces unique usernames; cannot be overwritten or deleted once claimed
+    // ===============================================================
     match /usernames/{usernameLower} {
       allow get: if isSignedIn();
       allow list: if false;
@@ -157,6 +205,12 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ===============================================================
+    // 3. friendRequests/{requestId}
+    // - requestId must be deterministic: fromUid + "_" + toUid
+    // - Prevents sending to yourself or creating duplicate pending requests
+    // - Only visible to sender (fromUid) or recipient (toUid)
+    // ===============================================================
     match /friendRequests/{requestId} {
       allow get, list: if isSignedIn() &&
         (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
@@ -184,6 +238,11 @@ service cloud.firestore {
         (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid);
     }
 
+    // ===============================================================
+    // 4. friendships/{friendshipId}
+    // - May only be created by the accepting recipient after the corresponding
+    //   friendRequest between the two users has status == 'accepted'
+    // ===============================================================
     function hasAcceptedRequestForRecipient(uidA, uidB) {
       let reqAB = /databases/$(database)/documents/friendRequests/$(uidA + '_' + uidB);
       let reqBA = /databases/$(database)/documents/friendRequests/$(uidB + '_' + uidA);
@@ -226,10 +285,29 @@ service cloud.firestore {
         request.auth.uid in existing().members;
     }
 
+    // ===============================================================
+    // 5. rooms/{code} and rooms/{code}/members/{uid}
+    // - Only the host may change hostUid, startedAt, durationSec, focusMinutes,
+    //   shortBreakMinutes, longBreakMinutes, vibe, mode, status, or remove other members.
+    // - vibe must be a short string (<= 100 chars) referencing a built-in beat or
+    //   cloud track (never a custom private uploaded file).
+    // - focusMinutes, shortBreakMinutes, longBreakMinutes must be 1..180 and
+    //   may NEVER be changed while status is 'running'.
+    // - A non-host may ONLY add or remove THEIR OWN uid in memberUids.
+    // - Joining is refused when memberUids already has 10 members.
+    // ===============================================================
     function hasValidRoomCustomDurations(data) {
       return (!('focusMinutes' in data) || (data.focusMinutes is int && data.focusMinutes >= 1 && data.focusMinutes <= 180)) &&
         (!('shortBreakMinutes' in data) || (data.shortBreakMinutes is int && data.shortBreakMinutes >= 1 && data.shortBreakMinutes <= 180)) &&
         (!('longBreakMinutes' in data) || (data.longBreakMinutes is int && data.longBreakMinutes >= 1 && data.longBreakMinutes <= 180));
+    }
+
+    function hasValidRoomVibe(data) {
+      return !('vibe' in data) || (
+        data.vibe is string &&
+        data.vibe.size() <= 100 &&
+        (data.vibe == '' || data.vibe.matches('^(builtin:[a-z]+|track:[a-zA-Z0-9_\\-]+)$'))
+      );
     }
 
     function isValidRoom(data) {
@@ -244,6 +322,7 @@ service cloud.firestore {
           'focusMinutes',
           'shortBreakMinutes',
           'longBreakMinutes',
+          'vibe',
           'status',
           'createdAt'
         ]) &&
@@ -257,9 +336,12 @@ service cloud.firestore {
         (data.startedAt == null || (data.startedAt is int && data.startedAt >= 0)) &&
         data.durationSec is int && data.durationSec >= 10 && data.durationSec <= 10800 &&
         hasValidRoomCustomDurations(data) &&
+        hasValidRoomVibe(data) &&
         data.status in ['idle', 'running', 'paused', 'completed'];
     }
 
+    // Host update guard: only host can change timer/settings/vibe, and focusMinutes/shortBreakMinutes/longBreakMinutes
+    // can NEVER be changed while existing().status == 'running'
     function isHostRoomUpdateValid() {
       return existing().hostUid == request.auth.uid &&
         (
@@ -326,6 +408,11 @@ service cloud.firestore {
       }
     }
 
+    // ===============================================================
+    // 6. tracks/{trackId}
+    // - Readable by all signed-in users; writable ONLY by admins
+    // - title < 100 chars, category in fixed list, url must start with https://
+    // ===============================================================
     function isValidTrack(data) {
       return data.keys().hasAll(['title', 'category', 'url', 'createdAt']) &&
         data.keys().hasOnly(['title', 'category', 'url', 'createdAt']) &&

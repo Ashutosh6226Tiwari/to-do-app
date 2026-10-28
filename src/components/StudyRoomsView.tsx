@@ -15,6 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import {
+  CloudAudioTrack,
   CloudUserDoc,
   MoodThemeConfig,
   RoomMemberItem,
@@ -25,13 +26,16 @@ import {
   clampRoomCustomMinutes,
   computeSharedRoomRemainingSeconds,
   formatTimeMMSS,
+  sanitizeRoomVibe,
 } from '../utils/focusLogic';
+import { SoundMixerPanel } from './SoundMixerPanel';
 
 interface StudyRoomsViewProps {
   currentUser: CloudUserDoc;
   activeRoom: StudyRoomDoc | null;
   roomMembers: RoomMemberItem[];
   themeConfig: MoodThemeConfig;
+  customTracks?: CloudAudioTrack[];
   onCreateRoom: (
     durationMinutes: number,
     roomDurations?: {
@@ -49,6 +53,7 @@ interface StudyRoomsViewProps {
     focusMinutes?: number;
     shortBreakMinutes?: number;
     longBreakMinutes?: number;
+    vibe?: string;
     status?: 'idle' | 'running' | 'paused' | 'completed';
   }) => Promise<void>;
   onUpdateMyMemberStatus: (status: 'focusing' | 'break' | 'idle') => Promise<void>;
@@ -76,6 +81,7 @@ export function StudyRoomsView({
   activeRoom,
   roomMembers,
   themeConfig,
+  customTracks = [],
   onCreateRoom,
   onJoinRoom,
   onLeaveRoom,
@@ -862,85 +868,103 @@ export function StudyRoomsView({
           )}
         </div>
 
-        {/* Live Room Members List (5 cols) */}
-        <div
-          className={`lg:col-span-5 p-6 rounded-2xl ${themeConfig.glassCardClass} flex flex-col justify-between`}
-        >
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h2
-                className={`text-base font-bold ${themeConfig.textPrimaryClass}`}
-                style={{ fontFamily: themeConfig.fontDisplay }}
-              >
-                Room Members ({roomMembers.length}/10)
-              </h2>
+        {/* Right Column: Live Room Members + Room Soundscape Mixer & Vibe (5 cols) */}
+        <div className="lg:col-span-5 space-y-6">
+          <div
+            className={`p-6 rounded-2xl ${themeConfig.glassCardClass} flex flex-col justify-between`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2
+                  className={`text-base font-bold ${themeConfig.textPrimaryClass}`}
+                  style={{ fontFamily: themeConfig.fontDisplay }}
+                >
+                  Room Members ({roomMembers.length}/10)
+                </h2>
 
-              {/* My Status Selector */}
-              <div className="flex items-center gap-1">
-                {(['focusing', 'break', 'idle'] as const).map((st) => (
-                  <button
-                    key={st}
-                    type="button"
-                    onClick={() => onUpdateMyMemberStatus(st)}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all ${
-                      myMemberDoc?.status === st
-                        ? themeConfig.activeTabClass
-                        : `${themeConfig.textMutedClass} hover:opacity-80`
-                    }`}
-                  >
-                    {st}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2.5">
-              {roomMembers.map((member) => {
-                const isRoomHost = member.uid === activeRoom.hostUid;
-                return (
-                  <div
-                    key={member.uid}
-                    data-testid={`room-member-${member.uid}`}
-                    className={`p-3 rounded-xl border ${themeConfig.borderClass} bg-black/5 dark:bg-white/5 flex items-center justify-between gap-3`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0"
-                        style={{ backgroundColor: themeConfig.accentHex }}
-                      >
-                        {member.name.slice(0, 2).toUpperCase()}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`text-xs sm:text-sm font-semibold truncate ${themeConfig.textPrimaryClass}`}
-                          >
-                            {member.name}
-                          </span>
-                          {isRoomHost && (
-                            <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold capitalize ${
-                        member.status === 'focusing'
-                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
-                          : member.status === 'break'
-                            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300'
-                            : 'bg-black/10 dark:bg-white/10 text-slate-500'
+                {/* My Status Selector */}
+                <div className="flex items-center gap-1">
+                  {(['focusing', 'break', 'idle'] as const).map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => onUpdateMyMemberStatus(st)}
+                      className={`px-2 py-1 rounded-lg text-[11px] font-semibold capitalize transition-all ${
+                        myMemberDoc?.status === st
+                          ? themeConfig.activeTabClass
+                          : `${themeConfig.textMutedClass} hover:opacity-80`
                       }`}
                     >
-                      <Radio className="w-3 h-3" />
-                      {member.status}
-                    </span>
-                  </div>
-                );
-              })}
+                      {st}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2.5">
+                {roomMembers.map((member) => {
+                  const isRoomHost = member.uid === activeRoom.hostUid;
+                  return (
+                    <div
+                      key={member.uid}
+                      data-testid={`room-member-${member.uid}`}
+                      className={`p-3 rounded-xl border ${themeConfig.borderClass} bg-black/5 dark:bg-white/5 flex items-center justify-between gap-3`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div
+                          className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0"
+                          style={{ backgroundColor: themeConfig.accentHex }}
+                        >
+                          {member.name.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`text-xs sm:text-sm font-semibold truncate ${themeConfig.textPrimaryClass}`}
+                            >
+                              {member.name}
+                            </span>
+                            {isRoomHost && (
+                              <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold capitalize ${
+                          member.status === 'focusing'
+                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
+                            : member.status === 'break'
+                              ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300'
+                              : 'bg-black/10 dark:bg-white/10 text-slate-500'
+                        }`}
+                      >
+                        <Radio className="w-3 h-3" />
+                        {member.status}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
+
+          {/* Room Soundscape Mixer + Host Room Vibe & Member Opt-In */}
+          <SoundMixerPanel
+            themeConfig={themeConfig}
+            customTracks={customTracks}
+            compact
+            roomContext={{
+              isHost,
+              currentVibe: activeRoom.vibe,
+              onHostChangeVibe: async (nextVibe: string) => {
+                await onHostUpdateTimer({
+                  vibe: sanitizeRoomVibe(nextVibe),
+                });
+              },
+            }}
+          />
         </div>
       </div>
     </div>

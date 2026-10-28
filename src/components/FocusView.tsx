@@ -1,18 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   CheckCircle2,
-  CloudRain,
-  Disc3,
   FastForward,
-  Headphones,
-  Music,
   Pause,
   Play,
   RotateCcw,
   Sparkles,
-  Volume2,
-  VolumeX,
-  Waves,
 } from 'lucide-react';
 import {
   CloudAudioTrack,
@@ -23,7 +16,6 @@ import {
   TimerMode,
   TimerSettings,
 } from '../types';
-import { AmbientTrackId, soundEngine } from '../utils/soundEngine';
 import {
   MoodSuggestionResponse,
   suggestMoodThemeWithGemini,
@@ -32,9 +24,8 @@ import { MOOD_THEMES } from '../utils/themes';
 import {
   formatTimeMMSS,
   getModeDurationMs,
-  isValidHttpsAudioUrl,
-  sanitizePlainText,
 } from '../utils/focusLogic';
+import { SoundMixerPanel } from './SoundMixerPanel';
 
 interface FocusViewProps {
   tasks: StudyTask[];
@@ -84,26 +75,6 @@ export function FocusView({
   const { mode, isRunning, completedFocusCycleCount, selectedTaskId } =
     timerState;
 
-  // Ambient audio player state
-  const [activeAmbient, setActiveAmbient] = useState<AmbientTrackId | null>(
-    () => soundEngine.getState().currentTrack
-  );
-  const [activeCustomTrackId, setActiveCustomTrackId] = useState<string | null>(
-    null
-  );
-  const customAudioRef = useRef<HTMLAudioElement | null>(null);
-  const [ambientVolume, setAmbientVolume] = useState<number>(
-    () => soundEngine.getState().volume
-  );
-
-  useEffect(() => {
-    return () => {
-      if (customAudioRef.current) {
-        customAudioRef.current.pause();
-      }
-    };
-  }, []);
-
   // Mood-based theme suggestion state
   const [feelingInput, setFeelingInput] = useState<string>('');
   const [isSuggestingMood, setIsSuggestingMood] = useState<boolean>(false);
@@ -114,53 +85,6 @@ export function FocusView({
   const totalSeconds = Math.ceil(
     getModeDurationMs(mode, timerSettings) / 1000
   );
-
-  const handleToggleAmbient = (track: AmbientTrackId) => {
-    if (customAudioRef.current) {
-      customAudioRef.current.pause();
-      setActiveCustomTrackId(null);
-    }
-    if (activeAmbient === track) {
-      soundEngine.stopAmbient();
-      setActiveAmbient(null);
-    } else {
-      soundEngine.startAmbient(track, ambientVolume);
-      setActiveAmbient(track);
-    }
-  };
-
-  const handleToggleCustomTrack = (track: CloudAudioTrack) => {
-    if (!isValidHttpsAudioUrl(track.url)) {
-      return;
-    }
-    if (activeAmbient) {
-      soundEngine.stopAmbient();
-      setActiveAmbient(null);
-    }
-    if (activeCustomTrackId === track.id) {
-      customAudioRef.current?.pause();
-      setActiveCustomTrackId(null);
-    } else {
-      if (customAudioRef.current) {
-        customAudioRef.current.pause();
-      }
-      const audio = new Audio(track.url.trim());
-      audio.loop = true;
-      audio.volume = ambientVolume;
-      customAudioRef.current = audio;
-      audio.play().catch(() => {});
-      setActiveCustomTrackId(track.id);
-    }
-  };
-  void sanitizePlainText;
-
-  const handleVolumeChange = (nextVol: number) => {
-    setAmbientVolume(nextVol);
-    soundEngine.setVolume(nextVol);
-    if (customAudioRef.current) {
-      customAudioRef.current.volume = nextVol;
-    }
-  };
 
   const handleAskMoodSuggestion = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -533,113 +457,11 @@ export function FocusView({
           )}
         </div>
 
-        {/* 2. Built-in Ambient Sound Player */}
-        <div className={`p-5 rounded-2xl ${themeConfig.glassCardClass}`}>
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Headphones className="w-4 h-4 text-sky-500" />
-              <h2
-                className={`text-base font-bold ${themeConfig.textPrimaryClass}`}
-                style={{ fontFamily: themeConfig.fontDisplay }}
-              >
-                Ambient Soundscape
-              </h2>
-            </div>
-            {(activeAmbient || activeCustomTrackId) && (
-              <span className="text-xs font-medium text-emerald-500">
-                Playing
-              </span>
-            )}
-          </div>
-
-          <div className="grid grid-cols-3 gap-2.5">
-            {(
-              [
-                { id: 'rain', label: 'Rain', Icon: CloudRain },
-                { id: 'lofi', label: 'Lo-Fi', Icon: Disc3 },
-                { id: 'whitenoise', label: 'White Noise', Icon: Waves },
-              ] as const
-            ).map(({ id, label, Icon }) => {
-              const isPlayingTrack = activeAmbient === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => handleToggleAmbient(id)}
-                  aria-pressed={isPlayingTrack}
-                  className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1.5 text-xs font-semibold transition-all ${
-                    isPlayingTrack
-                      ? themeConfig.activeTabClass
-                      : `${themeConfig.borderClass} ${themeConfig.textPrimaryClass} bg-white/30 dark:bg-slate-900/30 hover:opacity-90`
-                  }`}
-                >
-                  <Icon className="w-5 h-5" />
-                  <span>{label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Cloud Tracks from tracks/ collection */}
-          {customTracks.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-black/5 dark:border-white/10 space-y-2">
-              <div
-                className={`text-[11px] font-semibold ${themeConfig.textMutedClass}`}
-              >
-                Cloud Curated Tracks ({customTracks.length})
-              </div>
-              <div className="space-y-1.5">
-                {customTracks.map((ct) => {
-                  const isPlayingCustom = activeCustomTrackId === ct.id;
-                  return (
-                    <button
-                      key={ct.id}
-                      type="button"
-                      onClick={() => handleToggleCustomTrack(ct)}
-                      aria-pressed={isPlayingCustom}
-                      className={`w-full px-3 py-2 rounded-xl border text-left flex items-center justify-between gap-2 text-xs font-semibold transition-all ${
-                        isPlayingCustom
-                          ? themeConfig.activeTabClass
-                          : `${themeConfig.borderClass} ${themeConfig.textPrimaryClass} bg-white/30 dark:bg-slate-900/30 hover:opacity-90`
-                      }`}
-                    >
-                      <span className="flex items-center gap-2 truncate">
-                        <Music className="w-3.5 h-3.5 shrink-0" />
-                        <span className="truncate">{ct.title}</span>
-                      </span>
-                      <span className="text-[10px] opacity-80 shrink-0">
-                        {ct.category}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          <div className="mt-4 flex items-center gap-3">
-            {ambientVolume === 0 ? (
-              <VolumeX className={`w-4 h-4 ${themeConfig.textMutedClass}`} />
-            ) : (
-              <Volume2 className={`w-4 h-4 ${themeConfig.textMutedClass}`} />
-            )}
-            <input
-              type="range"
-              aria-label="Ambient sound volume"
-              min={0}
-              max={1}
-              step={0.05}
-              value={ambientVolume}
-              onChange={(e) => handleVolumeChange(Number(e.target.value))}
-              className="flex-1 accent-sky-600 cursor-pointer"
-            />
-            <span
-              className={`text-xs font-mono tabular-nums w-10 text-right ${themeConfig.textMutedClass}`}
-            >
-              {Math.round(ambientVolume * 100)}%
-            </span>
-          </div>
-        </div>
+        {/* 2. Soundscape Mixer & My Music Player */}
+        <SoundMixerPanel
+          themeConfig={themeConfig}
+          customTracks={customTracks}
+        />
 
         {/* 3. Gemini Mood-Based Theme & Session Length Suggestion */}
         <div className={`p-5 rounded-2xl ${themeConfig.glassCardClass}`}>

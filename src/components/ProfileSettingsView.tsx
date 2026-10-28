@@ -27,6 +27,12 @@ import {
 } from '../utils/focusLogic';
 import { MOOD_THEMES } from '../utils/themes';
 import { soundEngine } from '../utils/soundEngine';
+import {
+  APP_NAME,
+  APP_VERSION,
+  LumoLogo,
+  MadeByAshuWatermark,
+} from './LumoLogo';
 
 interface ProfileSettingsViewProps {
   profile: UserProfile;
@@ -186,6 +192,40 @@ export function ProfileSettingsView({
                   }}
                 />
               </div>
+            </div>
+
+            {/* Friend Stats Privacy Toggle */}
+            <div
+              className={`p-3.5 rounded-xl border ${themeConfig.borderClass} bg-black/5 dark:bg-white/5`}
+            >
+              <label className="flex items-start justify-between gap-3 cursor-pointer">
+                <div className="space-y-0.5">
+                  <span
+                    className={`block text-xs font-semibold ${themeConfig.textPrimaryClass}`}
+                  >
+                    Share my stats with friends
+                  </span>
+                  <span className={`block text-[11px] ${themeConfig.textMutedClass}`}>
+                    When on, friends can view your XP, study hours (today, this
+                    week, all-time), 7-day chart, and &ldquo;Studying now&rdquo;
+                    status. When off, friends see only your name, level, and
+                    streak. Task names, subjects, and session history are never
+                    shared.
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  data-testid="share-stats-toggle"
+                  checked={profile.shareStatsWithFriends !== false}
+                  onChange={(e) =>
+                    onUpdateProfile({
+                      ...profile,
+                      shareStatsWithFriends: e.target.checked,
+                    })
+                  }
+                  className="mt-0.5 w-4 h-4 rounded accent-sky-600 shrink-0 cursor-pointer"
+                />
+              </label>
             </div>
 
             <div className="flex items-center justify-between pt-2">
@@ -607,6 +647,38 @@ export function ProfileSettingsView({
           <RotateCcw className="w-3.5 h-3.5" />
           <span>Reset Demo Data</span>
         </button>
+      </div>
+
+      {/* 6. About Card with App Name, Version, and Made by Ashu Watermark */}
+      <div
+        data-testid="settings-about-card"
+        className={`p-5 sm:p-6 rounded-2xl ${themeConfig.glassCardClass} flex flex-wrap items-center justify-between gap-4`}
+      >
+        <div className="flex items-center gap-3.5">
+          <LumoLogo
+            themeConfig={themeConfig}
+            variant="wide"
+            size="md"
+            subtitle={`About ${APP_NAME} · Version ${APP_VERSION}`}
+            dataTestId="settings-about-logo"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <span
+            data-testid="settings-about-version"
+            className={`text-xs font-mono tabular-nums ${themeConfig.textSecondaryClass}`}
+          >
+            {APP_NAME} {APP_VERSION}
+          </span>
+          <span aria-hidden="true" className={themeConfig.textMutedClass}>
+            ·
+          </span>
+          <MadeByAshuWatermark
+            themeConfig={themeConfig}
+            dataTestId="settings-about-watermark"
+          />
+        </div>
       </div>
     </div>
   );

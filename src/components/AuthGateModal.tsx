@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  BookOpen,
   CheckCircle2,
   Cloud,
   KeyRound,
@@ -8,10 +7,10 @@ import {
   LogIn,
   ShieldCheck,
   Sparkles,
-  UserCheck,
 } from 'lucide-react';
 import { MoodThemeConfig } from '../types';
 import { validateUsername } from '../utils/focusLogic';
+import { LumoLogo, MadeByAshuWatermark } from './LumoLogo';
 
 interface AuthGateScreenProps {
   themeConfig: MoodThemeConfig;
@@ -60,24 +59,14 @@ export function GoogleSignInScreen({
       <div
         className={`w-full max-w-md p-6 sm:p-8 rounded-3xl shadow-2xl border ${themeConfig.glassCardClass}`}
       >
-        <div className="flex items-center gap-3 mb-6">
-          <div
-            className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-md shrink-0"
-            style={{ backgroundColor: themeConfig.accentHex }}
-          >
-            <BookOpen className="w-6 h-6" />
-          </div>
-          <div>
-            <h1
-              className={`text-2xl font-bold tracking-tight ${themeConfig.textPrimaryClass}`}
-              style={{ fontFamily: themeConfig.fontDisplay }}
-            >
-              FocusFlow
-            </h1>
-            <p className={`text-xs ${themeConfig.textSecondaryClass}`}>
-              Cloud Study Planner · Pomodoro · Friends & Study Rooms
-            </p>
-          </div>
+        <div className="mb-6">
+          <LumoLogo
+            themeConfig={themeConfig}
+            variant="wide"
+            size="lg"
+            subtitle="Cloud Study Planner · Pomodoro · Friends & Study Rooms"
+            dataTestId="signin-brand-logo"
+          />
         </div>
 
         <div className="space-y-3 mb-6">
@@ -242,11 +231,19 @@ export function GoogleSignInScreen({
 
           <button
             type="button"
+            data-testid="continue-guest-btn"
             onClick={onContinueLocalMode}
             className={`w-full py-2.5 px-4 rounded-xl font-semibold text-xs border transition-all ${themeConfig.borderClass} ${themeConfig.textSecondaryClass} ${themeConfig.buttonHoverClass}`}
           >
             Continue in Local Workspace (Offline / Preview Mode)
           </button>
+        </div>
+
+        <div className={`mt-5 pt-3.5 border-t ${themeConfig.borderClass} flex justify-center`}>
+          <MadeByAshuWatermark
+            themeConfig={themeConfig}
+            dataTestId="signin-watermark"
+          />
         </div>
       </div>
     </div>
@@ -306,22 +303,22 @@ export function UsernameClaimModal({
         className={`w-full max-w-md p-6 sm:p-7 rounded-3xl shadow-2xl border ${themeConfig.glassCardClass}`}
       >
         <div className="flex items-center gap-3 mb-4">
-          <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-white shrink-0"
-            style={{ backgroundColor: themeConfig.accentHex }}
-          >
-            <UserCheck className="w-5 h-5" />
-          </div>
+          <LumoLogo
+            themeConfig={themeConfig}
+            variant="icon"
+            size="md"
+            dataTestId="onboarding-brand-logo"
+          />
           <div>
             <h2
               id="claim-username-title"
               className={`text-lg font-bold ${themeConfig.textPrimaryClass}`}
               style={{ fontFamily: themeConfig.fontDisplay }}
             >
-              Choose Your Unique Username
+              Welcome to Lumo — Choose Your Username
             </h2>
             <p className={`text-xs ${themeConfig.textMutedClass}`}>
-              Welcome, {displayName || email}! Claim your handle once.
+              Hi {displayName || email}! Claim your unique student handle once.
             </p>
           </div>
         </div>
@@ -395,6 +392,13 @@ export function UsernameClaimModal({
             </button>
           </div>
         </form>
+
+        <div className={`mt-5 pt-3.5 border-t ${themeConfig.borderClass} flex justify-center`}>
+          <MadeByAshuWatermark
+            themeConfig={themeConfig}
+            dataTestId="onboarding-watermark"
+          />
+        </div>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { Flame, Pause, Timer, Trophy } from 'lucide-react';
 import { MoodThemeConfig, MoodThemeId, TimerMode } from '../types';
 import { formatTimeMMSS, LevelProgressInfo } from '../utils/focusLogic';
 import { MOOD_THEMES } from '../utils/themes';
+import { LumoLogo } from './LumoLogo';
 
 interface HeaderBarProps {
   studentName: string;
@@ -59,8 +60,15 @@ export function HeaderBar({
       className={`sticky top-0 z-30 px-4 sm:px-6 py-3 transition-colors duration-300 ${themeConfig.glassHeaderClass}`}
     >
       <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 sm:gap-4">
-        {/* Left: Student Greeting & Level Title */}
-        <div className="flex items-center gap-3 min-w-0">
+        {/* Left: Mobile Icon-Only Logo + Student Greeting & Level Title */}
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <LumoLogo
+            themeConfig={themeConfig}
+            variant="icon"
+            size="md"
+            dataTestId="mobile-brand-logo"
+            className="md:hidden"
+          />
           <div
             className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white shrink-0 shadow-sm transition-transform duration-500"
             style={{

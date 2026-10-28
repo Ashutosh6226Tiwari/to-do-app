@@ -52,6 +52,14 @@
           "pattern": "^[0-9]{4}-W[0-9]{2}$",
           "description": "ISO week identifier such as 2026-W44"
         },
+        "dailyMinutes": {
+          "type": "object",
+          "description": "Map of the last 14 days (YYYY-MM-DD date key to integer minutes 0..1440, max 14 entries)"
+        },
+        "shareStatsWithFriends": {
+          "type": "boolean",
+          "description": "Whether the student shares detailed study stats with friends (default true)"
+        },
         "studyingNow": {
           "type": "boolean",
           "description": "Whether the student is currently running a focus session"
@@ -199,6 +207,12 @@
           "type": "integer",
           "description": "Configured room long break duration in minutes (1 to 180)"
         },
+        "vibe": {
+          "type": "string",
+          "maxLength": 100,
+          "pattern": "^(|builtin:[a-z]+|track:[a-zA-Z0-9_\\-]+)$",
+          "description": "Optional shared room vibe (built-in beat or cloud track ID) set only by the room host"
+        },
         "status": {
           "type": "string",
           "enum": ["idle", "running", "paused", "completed"],
@@ -291,6 +305,10 @@
         "dailyGoalHours": {
           "type": "number",
           "description": "Daily study goal in hours (0 to 16)"
+        },
+        "shareStatsWithFriends": {
+          "type": "boolean",
+          "description": "Whether the student shares detailed study stats with friends (default true)"
         }
       },
       "required": ["tasks", "settings", "theme"]

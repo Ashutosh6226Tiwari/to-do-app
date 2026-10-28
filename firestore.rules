@@ -37,8 +37,34 @@ service cloud.firestore {
     // - Allow get by uid for signed-in users, but DENY list so nobody can enumerate profiles
     // - First migration allows starting xp up to 100000; afterwards max +500 XP per write
     // - Sanity limits: currentStreak (0..3650), weeklyMinutes (0..10080), level must not drop
+    // - dailyMinutes: optional map of at most 14 entries where every value is an int from 0 to 1440
+    // - shareStatsWithFriends: optional bool (default true)
     // - Role is 'user' on creation and immutable by client writes (changed only in Firebase Console)
     // ===============================================================
+    function isValidDailyMinuteEntry(vals, idx) {
+      return vals.size() <= idx || (vals[idx] is int && vals[idx] >= 0 && vals[idx] <= 1440);
+    }
+
+    function isValidDailyMinutesMap(dm) {
+      let vals = dm.values();
+      return dm is map &&
+        dm.size() <= 14 &&
+        isValidDailyMinuteEntry(vals, 0) &&
+        isValidDailyMinuteEntry(vals, 1) &&
+        isValidDailyMinuteEntry(vals, 2) &&
+        isValidDailyMinuteEntry(vals, 3) &&
+        isValidDailyMinuteEntry(vals, 4) &&
+        isValidDailyMinuteEntry(vals, 5) &&
+        isValidDailyMinuteEntry(vals, 6) &&
+        isValidDailyMinuteEntry(vals, 7) &&
+        isValidDailyMinuteEntry(vals, 8) &&
+        isValidDailyMinuteEntry(vals, 9) &&
+        isValidDailyMinuteEntry(vals, 10) &&
+        isValidDailyMinuteEntry(vals, 11) &&
+        isValidDailyMinuteEntry(vals, 12) &&
+        isValidDailyMinuteEntry(vals, 13);
+    }
+
     function hasAllowedUserFieldsOnly(data) {
       return data.keys().hasAll([
         'displayName',
@@ -66,6 +92,8 @@ service cloud.firestore {
         'totalMinutes',
         'weeklyMinutes',
         'weekKey',
+        'dailyMinutes',
+        'shareStatsWithFriends',
         'studyingNow',
         'role',
         'createdAt'
@@ -85,6 +113,8 @@ service cloud.firestore {
         data.totalMinutes is int && data.totalMinutes >= 0 && data.totalMinutes <= 5256000 &&
         data.weeklyMinutes is int && data.weeklyMinutes >= 0 && data.weeklyMinutes <= 10080 &&
         data.weekKey is string && data.weekKey.size() >= 6 && data.weekKey.size() <= 12 &&
+        (!('dailyMinutes' in data) || isValidDailyMinutesMap(data.dailyMinutes)) &&
+        (!('shareStatsWithFriends' in data) || data.shareStatsWithFriends is bool) &&
         data.studyingNow is bool &&
         data.role in ['user', 'admin'] &&
         data.createdAt is string && data.createdAt.size() <= 40;
@@ -119,20 +149,21 @@ service cloud.firestore {
 
       allow delete: if false;
 
-      // Private user app state (tasks, timer settings, theme, dailyGoalHours)
+      // Private user app state (tasks, timer settings, theme, dailyGoalHours, shareStatsWithFriends)
       match /private/{docId} {
         allow get, list: if isOwner(uid);
         allow create, update: if isOwner(uid) &&
           isValidId(docId) &&
           incoming().keys().hasAll(['tasks', 'settings', 'theme']) &&
-          incoming().keys().hasOnly(['tasks', 'settings', 'theme', 'dailyGoalHours']) &&
+          incoming().keys().hasOnly(['tasks', 'settings', 'theme', 'dailyGoalHours', 'shareStatsWithFriends']) &&
           incoming().tasks is list && incoming().tasks.size() <= 200 &&
           incoming().settings is map &&
           incoming().theme in ['calm', 'cozy', 'deep-focus', 'fresh', 'energetic'] &&
           (!('dailyGoalHours' in incoming()) ||
             ((incoming().dailyGoalHours is int || incoming().dailyGoalHours is float) &&
              incoming().dailyGoalHours >= 0 &&
-             incoming().dailyGoalHours <= 16));
+             incoming().dailyGoalHours <= 16)) &&
+          (!('shareStatsWithFriends' in incoming()) || incoming().shareStatsWithFriends is bool);
         allow delete: if isOwner(uid);
       }
 
@@ -257,7 +288,9 @@ service cloud.firestore {
     // ===============================================================
     // 5. rooms/{code} and rooms/{code}/members/{uid}
     // - Only the host may change hostUid, startedAt, durationSec, focusMinutes,
-    //   shortBreakMinutes, longBreakMinutes, mode, status, or remove other members.
+    //   shortBreakMinutes, longBreakMinutes, vibe, mode, status, or remove other members.
+    // - vibe must be a short string (<= 100 chars) referencing a built-in beat or
+    //   cloud track (never a custom private uploaded file).
     // - focusMinutes, shortBreakMinutes, longBreakMinutes must be 1..180 and
     //   may NEVER be changed while status is 'running'.
     // - A non-host may ONLY add or remove THEIR OWN uid in memberUids.
@@ -267,6 +300,14 @@ service cloud.firestore {
       return (!('focusMinutes' in data) || (data.focusMinutes is int && data.focusMinutes >= 1 && data.focusMinutes <= 180)) &&
         (!('shortBreakMinutes' in data) || (data.shortBreakMinutes is int && data.shortBreakMinutes >= 1 && data.shortBreakMinutes <= 180)) &&
         (!('longBreakMinutes' in data) || (data.longBreakMinutes is int && data.longBreakMinutes >= 1 && data.longBreakMinutes <= 180));
+    }
+
+    function hasValidRoomVibe(data) {
+      return !('vibe' in data) || (
+        data.vibe is string &&
+        data.vibe.size() <= 100 &&
+        (data.vibe == '' || data.vibe.matches('^(builtin:[a-z]+|track:[a-zA-Z0-9_\\-]+)$'))
+      );
     }
 
     function isValidRoom(data) {
@@ -281,6 +322,7 @@ service cloud.firestore {
           'focusMinutes',
           'shortBreakMinutes',
           'longBreakMinutes',
+          'vibe',
           'status',
           'createdAt'
         ]) &&
@@ -294,10 +336,11 @@ service cloud.firestore {
         (data.startedAt == null || (data.startedAt is int && data.startedAt >= 0)) &&
         data.durationSec is int && data.durationSec >= 10 && data.durationSec <= 10800 &&
         hasValidRoomCustomDurations(data) &&
+        hasValidRoomVibe(data) &&
         data.status in ['idle', 'running', 'paused', 'completed'];
     }
 
-    // Host update guard: only host can change timer/settings, and focusMinutes/shortBreakMinutes/longBreakMinutes
+    // Host update guard: only host can change timer/settings/vibe, and focusMinutes/shortBreakMinutes/longBreakMinutes
     // can NEVER be changed while existing().status == 'running'
     function isHostRoomUpdateValid() {
       return existing().hostUid == request.auth.uid &&

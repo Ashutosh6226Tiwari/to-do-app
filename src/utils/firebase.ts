@@ -32,12 +32,17 @@ import {
 import {
   ALLOWED_TRACK_CATEGORIES,
   AllowedTrackCategory,
+  buildDailyMinutesFromSessions,
   clampRoomCustomMinutes,
+  formatDateKey,
   getIsoWeekKey,
   getLevelInfo,
   isValidHttpsAudioUrl,
   normalizeWeeklyMinutes,
+  sanitizeAndTrimDailyMinutes,
   sanitizePlainText,
+  sanitizeRoomVibe,
+  updateDailyMinutesOnSessionComplete,
   validateUsername,
 } from './focusLogic';
 
@@ -236,6 +241,7 @@ export async function claimUsernameAndInitializeCloudUser(params: {
     throw new Error(check.error || 'Username is not available.');
   }
 
+  const todayKey = formatDateKey(new Date());
   const weekKey = getIsoWeekKey(new Date());
   const level = getLevelInfo(localProfile.totalXp).level;
   const nowIso = new Date().toISOString();
@@ -243,6 +249,9 @@ export async function claimUsernameAndInitializeCloudUser(params: {
   const safeDisplayName =
     sanitizePlainText(displayName || localProfile.name || 'Student', 80) ||
     'Student';
+
+  const dailyMinutes = buildDailyMinutesFromSessions(localSessions, todayKey);
+  const shareStatsWithFriends = localProfile.shareStatsWithFriends !== false;
 
   const userDocData: Omit<CloudUserDoc, 'uid'> = {
     displayName: safeDisplayName,
@@ -258,6 +267,8 @@ export async function claimUsernameAndInitializeCloudUser(params: {
     totalMinutes: Math.max(0, Math.min(5256000, Math.floor(totalMinutes))),
     weeklyMinutes: Math.max(0, Math.min(10080, Math.floor(weeklyMinutes))),
     weekKey,
+    dailyMinutes,
+    shareStatsWithFriends,
     studyingNow: Boolean(studyingNow),
     role: 'user',
     createdAt: nowIso,
@@ -278,6 +289,7 @@ export async function claimUsernameAndInitializeCloudUser(params: {
       0,
       Math.min(16, Number(localProfile.dailyGoalHours) || 0)
     ),
+    shareStatsWithFriends,
   });
 
   // Migrate up to 25 recent local sessions into users/{uid}/sessions/{id}
@@ -307,7 +319,7 @@ export async function claimUsernameAndInitializeCloudUser(params: {
 }
 
 /**
- * Syncs private appState (tasks, settings, theme, dailyGoalHours) to users/{uid}/private/appState.
+ * Syncs private appState (tasks, settings, theme, dailyGoalHours, shareStatsWithFriends) to users/{uid}/private/appState.
  */
 export async function syncPrivateAppStateToCloud(
   uid: string,
@@ -324,6 +336,7 @@ export async function syncPrivateAppStateToCloud(
         0,
         Math.min(16, Number(profile.dailyGoalHours) || 0)
       ),
+      shareStatsWithFriends: profile.shareStatsWithFriends !== false,
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -331,7 +344,8 @@ export async function syncPrivateAppStateToCloud(
 }
 
 /**
- * Updates user's public stats in users/{uid}, automatically resetting weeklyMinutes when weekKey changes.
+ * Updates user's public stats in users/{uid}, automatically resetting weeklyMinutes when weekKey changes,
+ * updating and trimming dailyMinutes to the last 14 days (values 0..1440), and persisting shareStatsWithFriends.
  */
 export async function updateCloudUserProgress(
   existingDoc: CloudUserDoc,
@@ -339,11 +353,15 @@ export async function updateCloudUserProgress(
     displayName?: string;
     xpDelta?: number;
     addedMinutes?: number;
+    sessionDateKey?: string;
+    dailyMinutes?: Record<string, number>;
+    shareStatsWithFriends?: boolean;
     currentStreak?: number;
     longestStreak?: number;
     studyingNow?: boolean;
   }
 ): Promise<void> {
+  const todayKey = formatDateKey(new Date());
   const currentWeekKey = getIsoWeekKey(new Date());
   const normalizedWeek = normalizeWeeklyMinutes(
     existingDoc.weeklyMinutes,
@@ -367,6 +385,25 @@ export async function updateCloudUserProgress(
     sanitizePlainText(updates.displayName || existingDoc.displayName, 80) ||
     existingDoc.displayName;
 
+  const baseDailyMap = updates.dailyMinutes
+    ? sanitizeAndTrimDailyMinutes(updates.dailyMinutes, todayKey)
+    : sanitizeAndTrimDailyMinutes(existingDoc.dailyMinutes, todayKey);
+
+  const nextDailyMinutes =
+    addedMins > 0
+      ? updateDailyMinutesOnSessionComplete(
+          baseDailyMap,
+          updates.sessionDateKey || todayKey,
+          addedMins,
+          todayKey
+        )
+      : baseDailyMap;
+
+  const nextShareStats =
+    updates.shareStatsWithFriends !== undefined
+      ? Boolean(updates.shareStatsWithFriends)
+      : existingDoc.shareStatsWithFriends !== false;
+
   const payload: Omit<CloudUserDoc, 'uid'> = {
     displayName: safeDisplayName,
     photoURL: existingDoc.photoURL,
@@ -385,6 +422,8 @@ export async function updateCloudUserProgress(
       normalizedWeek.weeklyMinutes + addedMins
     ),
     weekKey: currentWeekKey,
+    dailyMinutes: nextDailyMinutes,
+    shareStatsWithFriends: nextShareStats,
     studyingNow:
       updates.studyingNow !== undefined
         ? updates.studyingNow
@@ -597,6 +636,7 @@ export async function createCloudStudyRoom(
     focusMinutes,
     shortBreakMinutes,
     longBreakMinutes,
+    vibe: 'builtin:lofichill',
     status: 'idle',
     createdAt: new Date().toISOString(),
   };
@@ -707,6 +747,7 @@ export async function updateCloudRoomTimer(
     focusMinutes?: number;
     shortBreakMinutes?: number;
     longBreakMinutes?: number;
+    vibe?: string;
     status?: 'idle' | 'running' | 'paused' | 'completed';
   }
 ): Promise<void> {
@@ -730,6 +771,11 @@ export async function updateCloudRoomTimer(
       ? room.longBreakMinutes ?? 15
       : patch.longBreakMinutes ?? room.longBreakMinutes ?? 15
   );
+  const resolvedVibe =
+    patch.vibe !== undefined
+      ? sanitizeRoomVibe(patch.vibe)
+      : sanitizeRoomVibe(room.vibe || '');
+
   const nextPayload: Omit<StudyRoomDoc, 'code'> = {
     hostUid: room.hostUid,
     memberUids: room.memberUids,
@@ -744,6 +790,7 @@ export async function updateCloudRoomTimer(
     focusMinutes,
     shortBreakMinutes,
     longBreakMinutes,
+    vibe: resolvedVibe,
     status: patch.status ?? room.status,
   };
   if (room.createdAt) {

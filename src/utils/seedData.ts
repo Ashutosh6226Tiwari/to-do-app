@@ -12,6 +12,7 @@ export function getInitialProfile(): UserProfile {
     dailyGoalHours: 3.5,
     totalXp: 285, // Level 3 Scholar
     theme: 'calm',
+    shareStatsWithFriends: true,
     timerSettings: {
       focusMinutes: 25,
       shortBreakMinutes: 5,

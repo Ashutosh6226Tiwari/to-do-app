@@ -475,7 +475,7 @@ Create between 4 and 7 high-impact tasks spaced across the timeframe.`,
       const response = await ai.models.generateContent({
         model: 'gemini-3.8-flash',
         contents: `A student says they feel: "${feeling}".
-Available mood themes in FocusFlow:
+Available mood themes in Lumo:
 - "calm": Misty blue lake, serene and low-stress for anxious or overwhelmed minds.
 - "cozy": Warm sunset amber, comforting and gentle for tired or rainy evenings.
 - "deep-focus": Dark purple night city, distraction-free high concentration for coding, math, or late-night cramming.
@@ -609,7 +609,7 @@ Write a warm, personalized weekly insight with:
 
   const port = Number(process.env.PORT) || 3000;
   app.listen(port, '0.0.0.0', () => {
-    console.log(`FocusFlow server listening on http://localhost:${port}`);
+    console.log(`Lumo server listening on http://localhost:${port}`);
   });
 }
 

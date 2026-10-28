@@ -537,4 +537,92 @@ test('6. Security hardening rules: users list denied, sessions strict schema (1.
   );
 });
 
+test('7. Room vibe security rule: only the host can change vibe, and vibe must be a short string (<= 100 chars) referencing a built-in beat or cloud track', () => {
+  assert.ok(rulesSource.includes('hasValidRoomVibe(data)'));
+  assert.ok(rulesSource.includes('data.vibe is string'));
+  assert.ok(rulesSource.includes('data.vibe.size() <= 100'));
+
+  const baseRoom: RoomDoc & { vibe?: string } = {
+    hostUid: 'host-1',
+    memberUids: ['host-1', 'member-2'],
+    maxMembers: 10,
+    mode: 'focus',
+    startedAt: null,
+    durationSec: 1500,
+    vibe: 'builtin:rain',
+    status: 'idle',
+  };
+
+  // Host changing vibe to another built-in beat -> ALLOWED
+  assert.equal(
+    evaluateRoomUpdate('host-1', baseRoom, {
+      ...baseRoom,
+      vibe: 'builtin:lofichill',
+    } as RoomDoc),
+    true
+  );
+
+  // Non-host ('member-2') attempting to change vibe -> DENIED
+  assert.equal(
+    evaluateRoomUpdate('member-2', baseRoom, {
+      ...baseRoom,
+      vibe: 'builtin:ocean',
+    } as RoomDoc),
+    false
+  );
+});
+
+test('8. Friend stats rules: dailyMinutes map allowed on users/{uid} with at most 14 entries and integer values 0..1440, plus shareStatsWithFriends boolean', () => {
+  assert.ok(rulesSource.includes('isValidDailyMinutesMap(data.dailyMinutes)'));
+  assert.ok(rulesSource.includes('dm is map &&'));
+  assert.ok(rulesSource.includes('dm.size() <= 14'));
+  assert.ok(
+    rulesSource.includes(
+      'vals[idx] is int && vals[idx] >= 0 && vals[idx] <= 1440'
+    )
+  );
+  assert.ok(
+    rulesSource.includes(
+      "!('shareStatsWithFriends' in data) || data.shareStatsWithFriends is bool"
+    )
+  );
+
+  const isValidDailyMinutesMapSim = (dm: unknown): boolean => {
+    if (!dm || typeof dm !== 'object' || Array.isArray(dm)) return false;
+    const vals = Object.values(dm as Record<string, unknown>);
+    if (vals.length > 14) return false;
+    return vals.every(
+      (v) => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 1440
+    );
+  };
+
+  // Valid 14-day map with integer minutes 0..1440 -> ALLOWED
+  const valid14Days: Record<string, number> = {};
+  for (let i = 1; i <= 14; i++) {
+    valid14Days[`2026-10-${String(i).padStart(2, '0')}`] = i * 25;
+  }
+  assert.equal(isValidDailyMinutesMapSim(valid14Days), true);
+
+  // Map with 15 entries (> 14) -> DENIED
+  const tooManyEntries = { ...valid14Days, '2026-10-15': 30 };
+  assert.equal(isValidDailyMinutesMapSim(tooManyEntries), false);
+
+  // Map with negative minutes (< 0) -> DENIED
+  assert.equal(
+    isValidDailyMinutesMapSim({ '2026-10-28': -5 }),
+    false
+  );
+
+  // Map with > 1440 minutes in a single day -> DENIED
+  assert.equal(
+    isValidDailyMinutesMapSim({ '2026-10-28': 1441 }),
+    false
+  );
+
+  // Map with non-integer float value -> DENIED
+  assert.equal(
+    isValidDailyMinutesMapSim({ '2026-10-28': 45.5 }),
+    false
+  );
+});
 
