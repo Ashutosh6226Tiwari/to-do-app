@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Offline · Lumo</title>
+    <style>
+      :root {
+        --sky-600: #0284c7;
+        --sky-700: #0369a1;
+        --sky-100: #e0f2fe;
+        --sky-50: #f0f9ff;
+        --slate-900: #0f172a;
+        --slate-700: #334155;
+        --slate-500: #64748b;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        background: linear-gradient(180deg, #bae6fd 0%, #e0f2fe 45%, #f1f5f9 100%);
+        color: var(--slate-900);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+      }
+      .card {
+        background: rgba(255, 255, 255, 0.75);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.85);
+        border-radius: 24px;
+        box-shadow: 0 12px 36px -8px rgba(2, 132, 199, 0.18);
+        max-width: 440px;
+        width: 100%;
+        padding: 2.25rem 2rem;
+        text-align: center;
+      }
+      .icon-box {
+        width: 64px;
+        height: 64px;
+        background: var(--sky-600);
+        border-radius: 18px;
+        margin: 0 auto 1.25rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 8px 20px -4px rgba(2, 132, 199, 0.45);
+      }
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin-bottom: 0.5rem;
+        color: var(--slate-900);
+      }
+      p {
+        font-size: 0.875rem;
+        line-height: 1.5;
+        color: var(--slate-700);
+        margin-bottom: 1.5rem;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 9999px;
+        background: rgba(2, 132, 199, 0.12);
+        color: var(--sky-700);
+        font-size: 0.75rem;
+        font-weight: 600;
+        margin-bottom: 1.25rem;
+      }
+      .pulse-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--sky-600);
+        animation: pulse 1.8s infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(0.85); }
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        background: var(--sky-600);
+        color: white;
+        border: none;
+        border-radius: 14px;
+        padding: 0.75rem 1.25rem;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s ease, transform 0.1s ease;
+      }
+      .btn:hover {
+        background: var(--sky-700);
+      }
+      .btn:active {
+        transform: scale(0.98);
+      }
+      .subtext {
+        margin-top: 1rem;
+        font-size: 0.75rem;
+        color: var(--slate-500);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="icon-box">
+        <svg width="34" height="34" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2.75" y="2.75" width="34.5" height="34.5" rx="10.25" stroke="#ffffff" stroke-opacity="0.45" stroke-width="1.5" />
+          <circle cx="20" cy="21" r="11" stroke="#ffffff" stroke-opacity="0.32" stroke-width="2.2" />
+          <path d="M20 10 A11 11 0 1 1 10.47 26.5" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" />
+          <path d="M14.8 20.5 A5.2 5.2 0 0 1 25.2 20.5" stroke="#ffffff" stroke-opacity="0.85" stroke-width="1.5" stroke-linecap="round" />
+          <line x1="20" y1="17.2" x2="20" y2="24.8" stroke="#ffffff" stroke-width="2.1" stroke-linecap="round" />
+        </svg>
+      </div>
+
+      <div class="badge">
+        <span class="pulse-dot"></span>
+        <span>Offline Mode</span>
+      </div>
+
+      <h1>You're studying offline</h1>
+      <p>
+        No active internet connection was detected. Lumo keeps your local tasks, focus timer, soundscape mixer, and streak data accessible offline on this device.
+      </p>
+
+      <button class="btn" onclick="window.location.reload()">
+        <span>Retry Connection</span>
+      </button>
+
+      <div class="subtext">
+        Cached workspace will sync to Cloud Firestore when your connection is restored.
+      </div>
+    </div>
+  </body>
+</html>

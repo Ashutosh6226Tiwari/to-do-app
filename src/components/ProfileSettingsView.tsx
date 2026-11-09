@@ -4,13 +4,16 @@ import {
   Check,
   Cloud,
   Database,
+  Download,
   KeyRound,
   LogIn,
   LogOut,
   Palette,
   Pencil,
   RotateCcw,
+  Share2,
   Sliders,
+  Smartphone,
   Trash2,
   Trophy,
   User,
@@ -29,6 +32,13 @@ import {
 } from '../utils/focusLogic';
 import { MOOD_THEMES } from '../utils/themes';
 import { soundEngine } from '../utils/soundEngine';
+import {
+  isAppInstalled,
+  isInstallPromptAvailable,
+  isIOSDevice,
+  promptPWAInstall,
+  requestNotificationPermission,
+} from '../utils/pwaManager';
 import {
   APP_NAME,
   APP_VERSION,
@@ -671,10 +681,13 @@ export function ProfileSettingsView({
         </div>
       </div>
 
+      {/* 6. Install Lumo (PWA) & System Notifications */}
+      <PWAInstallAndNotificationCard themeConfig={themeConfig} />
+
       {/* Suppress unused icon lint */}
       {false && <RotateCcw />}
 
-      {/* 6. About Card with App Name, Version, and Made by Ashu Watermark */}
+      {/* 7. About Card with App Name, Version, and Made by Ashu Watermark */}
       <div
         data-testid="settings-about-card"
         className={`p-5 sm:p-6 rounded-2xl ${themeConfig.glassCardClass} flex flex-wrap items-center justify-between gap-4`}
@@ -708,3 +721,168 @@ export function ProfileSettingsView({
     </div>
   );
 }
+
+function PWAInstallAndNotificationCard({
+  themeConfig,
+}: {
+  themeConfig: MoodThemeConfig;
+}) {
+  const [installed, setInstalled] = useState<boolean>(false);
+  const [canInstall, setCanInstall] = useState<boolean>(false);
+  const [isIOS, setIsIOS] = useState<boolean>(false);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>('default');
+
+  useEffect(() => {
+    setInstalled(isAppInstalled());
+    setCanInstall(isInstallPromptAvailable());
+    setIsIOS(isIOSDevice());
+
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotifPerm(Notification.permission);
+    }
+
+    const onInstallableChange = () => {
+      setInstalled(isAppInstalled());
+      setCanInstall(isInstallPromptAvailable());
+    };
+
+    window.addEventListener('lumo-installable-change', onInstallableChange);
+    return () => {
+      window.removeEventListener('lumo-installable-change', onInstallableChange);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    const accepted = await promptPWAInstall();
+    if (accepted) {
+      setInstalled(true);
+      setCanInstall(false);
+    }
+  };
+
+  const handleRequestNotif = async () => {
+    const res = await requestNotificationPermission();
+    setNotifPerm(res);
+  };
+
+  return (
+    <div
+      data-testid="pwa-settings-card"
+      className={`p-5 rounded-2xl ${themeConfig.glassCardClass} space-y-4`}
+    >
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <Smartphone
+              className="w-4 h-4"
+              style={{ color: themeConfig.accentHex }}
+            />
+            <h3
+              className={`text-sm font-bold ${themeConfig.textPrimaryClass}`}
+              style={{ fontFamily: themeConfig.fontDisplay }}
+            >
+              Progressive Web App (PWA) &amp; Device Integration
+            </h3>
+          </div>
+          <p className={`text-xs mt-0.5 ${themeConfig.textMutedClass}`}>
+            Install Lumo for an app-like standalone experience, offline access,
+            and background timer completion notifications.
+          </p>
+        </div>
+
+        {/* Installation Actions */}
+        <div className="flex items-center gap-2">
+          {installed ? (
+            <span
+              data-testid="pwa-installed-badge"
+              className="px-3 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-semibold text-xs inline-flex items-center gap-1.5"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>Installed (Standalone Mode)</span>
+            </span>
+          ) : canInstall ? (
+            <button
+              type="button"
+              data-testid="pwa-install-btn"
+              onClick={handleInstallClick}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-sm ${themeConfig.buttonBgClass}`}
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Install Lumo</span>
+            </button>
+          ) : isIOS ? (
+            <div
+              data-testid="ios-install-hint"
+              className={`p-2.5 rounded-xl border text-[11px] flex items-center gap-2 ${themeConfig.borderClass} ${themeConfig.textSecondaryClass} bg-black/5 dark:bg-white/5`}
+            >
+              <Share2 className="w-3.5 h-3.5 shrink-0 text-sky-500" />
+              <span>
+                To install on iPhone: tap <strong>Share</strong>, then tap{' '}
+                <strong>Add to Home Screen</strong>.
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              data-testid="pwa-install-btn"
+              onClick={handleInstallClick}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 ${themeConfig.borderClass} ${themeConfig.textSecondaryClass} ${themeConfig.buttonHoverClass}`}
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Install Lumo</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* System Notifications Control */}
+      <div
+        className={`pt-3 border-t ${themeConfig.borderClass} flex flex-wrap items-center justify-between gap-3`}
+      >
+        <div className="flex items-center gap-2">
+          <Bell className="w-3.5 h-3.5 text-amber-500" />
+          <div>
+            <span
+              className={`text-xs font-semibold block ${themeConfig.textPrimaryClass}`}
+            >
+              Session Completion Notifications
+            </span>
+            <span className={`text-[11px] ${themeConfig.textMutedClass}`}>
+              Get a system alert when a Pomodoro or break completes, even if Lumo is in the background.
+            </span>
+          </div>
+        </div>
+
+        <div>
+          {notifPerm === 'granted' ? (
+            <span
+              data-testid="notifications-granted-badge"
+              className="px-3 py-1 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-semibold text-xs inline-flex items-center gap-1.5"
+            >
+              <Check className="w-3 h-3" />
+              <span>System Notifications Active</span>
+            </span>
+          ) : notifPerm === 'denied' ? (
+            <span
+              data-testid="notifications-denied-badge"
+              className="px-3 py-1 rounded-xl bg-rose-500/15 text-rose-600 dark:text-rose-400 font-medium text-xs"
+            >
+              Notifications Blocked in Browser
+            </span>
+          ) : (
+            <button
+              type="button"
+              data-testid="enable-notifications-btn"
+              onClick={handleRequestNotif}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 ${themeConfig.borderClass} ${themeConfig.textPrimaryClass} ${themeConfig.buttonHoverClass}`}
+            >
+              <Bell className="w-3 h-3" />
+              <span>Enable Notifications</span>
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+

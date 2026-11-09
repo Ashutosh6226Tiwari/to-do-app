@@ -592,6 +592,25 @@ Write a warm, personalized weekly insight with:
     }
   });
 
+  // Serve .well-known/assetlinks.json explicitly with Content-Type: application/json
+  app.get('/.well-known/assetlinks.json', (_req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    const assetlinksPath = path.join(
+      __dirname,
+      'public',
+      '.well-known',
+      'assetlinks.json'
+    );
+    if (fs.existsSync(assetlinksPath)) {
+      res.sendFile(assetlinksPath);
+    } else {
+      res.json([]);
+    }
+  });
+
+  // Serve public folder static assets (manifest, sw, icons)
+  app.use(express.static(path.join(__dirname, 'public')));
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({

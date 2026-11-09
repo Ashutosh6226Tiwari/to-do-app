@@ -119,6 +119,12 @@ import {
   LumoLogo,
   MadeByAshuWatermark,
 } from './components/LumoLogo';
+import { PWABanners } from './components/PWABanners';
+import {
+  registerLumoServiceWorker,
+  showTimerCompletionNotification,
+  syncMediaSessionState,
+} from './utils/pwaManager';
 
 const STORAGE_KEYS = {
   PROFILE: 'focusflow_profile_v1',
@@ -788,6 +794,10 @@ export default function App() {
         setLastCompletedToast(
           `${MODE_LABELS[outcome.mode]} complete! Ready for your next focus session.`
         );
+        void showTimerCompletionNotification(
+          `Lumo — ${MODE_LABELS[outcome.mode]} complete!`,
+          'Ready for your next focus session.'
+        );
         return;
       }
 
@@ -848,6 +858,10 @@ export default function App() {
       setSessions((prev) => [newRecord, ...prev]);
       setLastCompletedToast(
         `Completed ${outcome.durationMinutes}m Focus Session (+${xpEarned} XP)!`
+      );
+      void showTimerCompletionNotification(
+        'Lumo — Focus session complete!',
+        `Completed ${outcome.durationMinutes}m focus session (+${xpEarned} XP)! Time for a break.`
       );
 
       if (cloudUserDoc && firebaseUser && !needsUsernameClaim) {
@@ -968,6 +982,12 @@ export default function App() {
     }
     link.href = faviconUri;
   }, [themeConfig.accentHex]);
+
+  // Register PWA service worker on initial mount
+  useEffect(() => {
+    registerLumoServiceWorker();
+  }, []);
+
 
   // Auth Handlers
   const handleGoogleSignIn = async (enteredName?: string) => {
@@ -1121,6 +1141,29 @@ export default function App() {
     setTimerState(reset);
     setRemainingSeconds(computeRemainingSeconds(reset, nowMs));
   };
+
+  // Sync Media Session API metadata so lock-screen / notification center controls appear
+  useEffect(() => {
+    const selectedTask = tasks.find((t) => t.id === timerState.selectedTaskId);
+    const mediaTitle = selectedTask
+      ? `Lumo — Focus: ${selectedTask.title}`
+      : 'Lumo - Focus session';
+
+    syncMediaSessionState({
+      isPlaying: timerState.isRunning,
+      title: mediaTitle,
+      artist: 'Lumo Ambient Mixer',
+      onPlay: handleStartPauseTimer,
+      onPause: handleStartPauseTimer,
+      onStop: handleResetTimer,
+    });
+  }, [
+    timerState.isRunning,
+    timerState.selectedTaskId,
+    tasks,
+    handleStartPauseTimer,
+    handleResetTimer,
+  ]);
 
   const handleSwitchTimerMode = (nextMode: TimerMode) => {
     const nowMs = Date.now();
@@ -1817,6 +1860,7 @@ export default function App() {
         style={{ fontFamily: themeConfig.fontBody }}
       >
         <MoodBackground theme={profile.theme} />
+        <PWABanners themeConfig={themeConfig} />
         <GoogleSignInScreen
           themeConfig={themeConfig}
           isSigningIn={isSigningIn}
@@ -1846,6 +1890,7 @@ export default function App() {
       style={{ fontFamily: themeConfig.fontBody }}
     >
       <MoodBackground theme={profile.theme} />
+      <PWABanners themeConfig={themeConfig} />
 
       {/* Daily Goal Dialog */}
       <DailyGoalModal
